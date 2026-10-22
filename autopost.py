@@ -47,7 +47,7 @@ def prepare(date, t):
     except Exception as e:   # the slot itself retries and reports at post time
         P.log(f'prepare {t} failed: {e}', f='post.log'); return
     previews = []
-    for uid in P.allowed():
+    for uid in ([] if P.ENV.get('PIP_AUTO_POST', '') == '1' else P.allowed()):   # auto mode: no previews, no approvals
         try: previews.append([uid, send_preview(uid, d, date, t)])
         except Exception as e: P.log('preview failed for', uid, e)
     P.update_slot(date, t, status='ready', previews=previews)
@@ -124,7 +124,8 @@ def post_slot(date, t):
     if os.path.exists(PAUSED):
         P.update_slot(date, t, status='paused'); clear_previews(s); mark_pending(date, t, 'paused')
         P.log(f'{t} not posted: paused (state/paused)', f='post.log'); return
-    if not (s.get('approved') or s.get('manual')):
+    AUTO = P.ENV.get('PIP_AUTO_POST', '') == '1'   # 1 = post on schedule without approval (Samanway, 2026-10-23)
+    if not (AUTO or s.get('approved') or s.get('manual')):
         P.log(f'{t} waiting for approval, not posted', f='post.log'); return
     pj = read_pending(date, t)
     if pj and pj.get('skip'):
