@@ -9,7 +9,9 @@ It only ever shows the 5 strategies we promote: **Cool Wave, Glade Coms, Nightsh
 ## What it does
 
 - **3 posts a day** (Johannes' plan, Bangkok time):
-  - 1 pm: **Creative.** Rotates through three designs: 🔥 *On fire* (the day's best result), 🏆 *The podium* (top 3 of the day), and *93 out of 100* (a strategy's win rate as 100 trades).
+  - 1 pm: **Creative.** A different design every day, from 10 formats in rotation (each one comes back only every 10 days, with a new strategy or new numbers):
+    🔥 On fire (the day's best) · 🏁 The race · 🎯 93 out of 100 (win rate as 100 trades) · 🥊 Head to head · 🏆 The podium · 🛡️ The calm one (drawdown gauge) ·
+    🃏 Pick your card · 🎉 Milestone club (+900% club) · 📟 The board (LED ticker) · 🤔 Guess who?
   - 5 pm: **Performance update.** One strategy in Akhil's stat-grid style: today, this week, total ROI, win rate, max drawdown, plus the day's ranking.
   - 8 pm: **Daily results.** All 5 strategies compared for the day in one table, with the best result, how many are in profit, and the average.
 - **Every Sunday at 8 pm:** the weekly results, the same table for the week.

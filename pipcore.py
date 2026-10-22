@@ -2,7 +2,7 @@
 Shared by autopost.py (the schedule) and bot.py (the control bot). Every number on a post comes from the provider API;
 text that Claude writes is checked and any number it can't trace back to the API is rejected.
 Env overrides (used by the tests): PIP_HOME, PIP_DATA_FILE, PIP_FETCH, PIP_CLAUDE, TELEGRAM_API, PIP_NOW."""
-import time, os, sys, json, re, html, uuid, time, shutil, fcntl, random, datetime, tempfile, subprocess, urllib.request, urllib.error, contextlib
+import time, os, sys, json, re, html, uuid, time, shutil, fcntl, random, math, itertools, datetime, tempfile, subprocess, urllib.request, urllib.error, contextlib
 from zoneinfo import ZoneInfo
 
 D = os.environ.get('PIP_HOME') or os.path.dirname(os.path.abspath(__file__))
@@ -384,11 +384,17 @@ def weekly_angle(data, old=None):
 
 
 # ---------- 1 pm creative post (team, 2026-10-22): on fire / the podium / 93 out of 100, in rotation ----------
-CREATIVE = ('fire', 'podium', 'grid')
+CREATIVE = ('fire', 'race', 'grid', 'vs', 'podium', 'gauge', 'cards', 'club', 'ticker', 'guess')   # 1 pm rotation: a different format every day
 SPIRIT = {84: '⚔️', 100: '🌊', 101: '🛡️', 102: '⚙️', 103: '🌙'}
+def strong_day(data): up = day_up(data); return bool(up) and up[0]['dayRoi'] >= 0.2   # a real move, not +0.04% just after midnight
+
+def lead(data):
+    """What the creative posts rank by: today's result when someone is up today, else all-time ROI. Returns (metric, value fn)."""
+    return ('day', lambda p: p.get('dayRoi', -1e9)) if strong_day(data) else ('roi', lambda p: p['allTimeRoi'])
+
 def creative_angles(data):
     up = day_up(data); v = now().timetuple().tm_yday % 2; out = []
-    if up and up[0]['dayRoi'] >= 0.2:   # "on fire" only for a real move; otherwise the all-time version
+    if strong_day(data):   # "on fire" only for a real move; otherwise the all-time version
         p = up[0]
         cap = [f'{nm(p)} is on fire today 🔥\n\n{f_day(p)} and top of the board.', f'🔥 Best of the day: {nm(p)}\n\n{f_day(p)} today, {f_wr(p)} win rate.'][v]
         out.append({'key': f'fire:{p["id"]}', 'layout': 'fire', 'pid': p['id'], 'metric': 'day', 'headline': nm(p), 'caption': cap + NFA})
@@ -405,6 +411,28 @@ def creative_angles(data):
     for p in sorted(data.ps, key=lambda p: -p['winRate']):
         out.append({'key': f'grid:{p["id"]}', 'layout': 'grid', 'pid': p['id'], 'metric': 'wr', 'headline': nm(p),
                     'caption': f'{SPIRIT.get(p["id"], "📊")} {nm(p)}\n\nOut of every 100 trades, {round(p["winRate"])} close in profit.\n\n{f_wr(p)} win rate.' + NFA})
+    m, v = lead(data); ps = sorted([p for p in data.ps if m != 'day' or 'dayRoi' in p], key=lambda p: -v(p)); val = METRIC[m][1]
+    out.append({'key': f'race:{m}', 'layout': 'race', 'rows': [p['id'] for p in ps], 'metric': m, 'headline': 'The race',
+                'caption': ("Today's race 🏁" if m == 'day' else 'The race to the top 🏁') + '\n\n' + '\n'.join(f'{i}. {nm(p)} {val(p)}' for i, p in enumerate(ps, 1)) + '\n\nWho takes it next? 👀' + NFA})
+    for x, y in itertools.combinations(ps, 2):
+        out.append({'key': f'vs:{x["id"]}-{y["id"]}', 'layout': 'vs', 'rows': [x['id'], y['id']], 'metric': m, 'headline': f'{nm(x)} vs {nm(y)}',
+                    'caption': f'{nm(x)} vs {nm(y)} 🥊\n\n' + '\n'.join(f'{nm(p)}: {f_roi(p)} total ROI, {f_wr(p)} win rate' for p in (x, y)) + "\n\nWho's your pick? 👇" + NFA})
+    p = min(data.ps, key=lambda p: p['drawdown'])
+    out.append({'key': f'gauge:{p["id"]}', 'layout': 'gauge', 'pid': p['id'], 'metric': 'dd', 'headline': 'The calm one',
+                'caption': f"The calm one 🛡️\n\n{nm(p)}'s deepest dip, all time: {f_dd(p)}.\nWin rate {f_wr(p)}, total ROI {f_roi(p)}." + NFA})
+    out.append({'key': f'cards:{m}', 'layout': 'cards', 'rows': [p['id'] for p in ps], 'metric': m, 'headline': 'Pick your card',
+                'caption': 'Pick your card 🃏\n\n' + '\n'.join(f'{md} {nm(p)} {val(p)}' for md, p in zip(['🥇', '🥈', '🥉', '4️⃣', '5️⃣'], ps)) + '\n\nWhich one are you copying? 👇' + NFA})
+    for p in sorted(data.ps, key=lambda p: -p['allTimeRoi']):
+        club = int(p['allTimeRoi'] // 100 * 100)
+        if club >= 100:
+            out.append({'key': f'club:{p["id"]}:{club}', 'layout': 'club', 'pid': p['id'], 'club': club, 'metric': 'roi', 'headline': f'+{club}% club', 'extra': [club],
+                        'caption': f'{nm(p)} is in the +{club}% club 🎉\n\n{f_roi(p)} total ROI, all time.' + NFA})
+    bo = sorted(data.ps, key=lambda p: -p['allTimeRoi'])
+    out.append({'key': 'ticker:roi', 'layout': 'ticker', 'rows': [p['id'] for p in bo], 'metric': 'roi', 'headline': 'The board',
+                'caption': 'The board 📟\n\n' + '\n'.join(f'▲ {nm(p)} {f_roi(p)} · win rate {f_wr(p)}' for p in bo) + NFA})
+    for p in sorted(data.ps, key=lambda p: -p['winRate']):
+        out.append({'key': f'guess:{p["id"]}', 'layout': 'guess', 'pid': p['id'], 'metric': 'roi', 'headline': 'Guess who?',
+                    'caption': f'Guess who? 🤔\n\nTotal ROI {f_roi(p)}, win rate {f_wr(p)}, max drawdown {f_dd(p)}. {p["strategyType"]}.\n\nDrop your guess in the comments 👇' + NFA})
     for a in out: a['brief'] = f"Creative post ({a['layout']}): " + '; '.join(f'{nm(data.by_id[i])}: {facts(data.by_id[i])}' for i in a.get('rows') or [a['pid']])
     return out
 
@@ -722,7 +750,66 @@ CREATIVE_CSS = """*{box-sizing:border-box}body{margin:0;width:1080px;height:1350
 .blk b{font-size:46px;font-weight:900;white-space:nowrap;letter-spacing:-1px}.blk span{font-size:18px;letter-spacing:3px;margin-top:6px;font-weight:700;opacity:.85}.blk .n{font-size:120px;font-weight:900;opacity:.18;margin-top:auto;line-height:1}
 .g1{height:500px;background:linear-gradient(180deg,#ffe27a,#f5b70f 40%,#9a6a00);color:#2a1900;box-shadow:0 0 60px rgba(255,200,40,.45)}
 .g2{height:390px;background:linear-gradient(180deg,#f4f7ff,#b9c4d9 45%,#5d6a82);color:#141a26}
-.g3{height:320px;background:linear-gradient(180deg,#ffc79a,#d9803f 45%,#7a3d12);color:#2a1305}"""
+.g3{height:320px;background:linear-gradient(180deg,#ffc79a,#d9803f 45%,#7a3d12);color:#2a1305}
+/* race */
+.race{background:radial-gradient(60% 35% at 50% 0%,rgba(40,100,255,.35),rgba(0,0,0,0) 70%),linear-gradient(180deg,#0a1024,#05070f)}
+.race .tag{background:linear-gradient(90deg,#ff2e63,#ff9a3c);box-shadow:0 0 30px rgba(255,60,90,.5)}
+.ct{position:absolute;left:64px;top:170px;font-size:100px;font-weight:900;letter-spacing:-3px;line-height:1}.cs{position:absolute;left:64px;top:290px;font-size:28px;letter-spacing:8px;color:#c9d6ff;font-weight:700}
+.lanes{position:absolute;left:64px;right:64px;top:370px;display:flex;flex-direction:column;gap:18px}
+.lane{position:relative;height:150px;border-radius:18px;background:linear-gradient(180deg,#1d2438,#121827);border:1px solid rgba(255,255,255,.09);overflow:hidden}
+.lane:before{content:"";position:absolute;left:250px;right:70px;top:50%;border-top:4px dashed rgba(255,255,255,.16)}
+.lane:after{content:"";position:absolute;right:0;top:0;bottom:0;width:56px;background:repeating-conic-gradient(#fff 0 25%,#111 0 50%) 0 0/28px 28px;opacity:.85}
+.ln{position:absolute;left:22px;top:50%;transform:translateY(-50%)}.car{position:absolute;top:50%;font-size:86px;transform:translate(-50%,-50%) scaleX(-1)}
+.lv{position:absolute;top:50%;transform:translateY(-50%);font-size:34px;font-weight:900;white-space:nowrap}.lv.g{color:#4dff9a}.lv.r{color:#ff7a7a}
+/* vs */
+.vs{background:linear-gradient(105deg,#0b2a8a 0 49.8%,#ffffff 49.8% 50.2%,#4a0d6e 50.2% 100%)}.vs:before{content:"";position:absolute;inset:0;background:radial-gradient(60% 50% at 50% 30%,rgba(0,0,0,0),rgba(0,0,0,.5)),linear-gradient(180deg,rgba(3,5,15,0) 55%,rgba(3,5,15,.97) 80%)}
+.vs .tag{background:linear-gradient(90deg,#ffd000,#ff7a00);color:#201000;box-shadow:0 0 30px rgba(255,180,0,.5)}
+.side2{position:absolute;top:190px;width:430px;display:flex;flex-direction:column;align-items:center;gap:14px}.side2 small{font-size:20px;letter-spacing:4px;color:rgba(255,255,255,.75);font-weight:700}
+.vsb{position:absolute;left:50%;top:205px;transform:translateX(-50%);width:150px;height:150px;border-radius:50%;background:#0a0a14;border:4px solid #ffd000;display:flex;align-items:center;justify-content:center;font-size:62px;font-weight:900;font-style:italic;color:#ffd000;box-shadow:0 0 40px rgba(255,200,0,.6)}
+.vrows{position:absolute;left:64px;right:64px;top:450px;display:flex;flex-direction:column;gap:16px}
+.vr{display:grid;grid-template-columns:1fr 260px 1fr;align-items:center;height:136px;border-radius:20px;background:rgba(5,8,25,.55);border:1px solid rgba(255,255,255,.14)}
+.vr b{text-align:center;font-size:48px;font-weight:900;white-space:nowrap}.vr span{text-align:center;font-size:20px;letter-spacing:3px;color:#d8defa;font-weight:700}
+.vr b.win{color:#4dff9a;text-shadow:0 0 22px rgba(77,255,154,.45)}.vr b.win:after{content:" 👑";font-family:"Apple Color Emoji";font-size:34px}
+.vq{margin-top:44px;text-align:center;font-size:56px;font-weight:900}
+/* gauge */
+.gauge{background:radial-gradient(60% 40% at 50% 45%,rgba(40,200,140,.22),rgba(0,0,0,0) 70%),linear-gradient(180deg,#041a22,#020a10)}
+.gauge .tag{background:linear-gradient(90deg,#16c784,#0fa3b1);box-shadow:0 0 30px rgba(22,199,132,.5)}
+.glogo{position:absolute;left:0;right:0;top:330px;display:flex;justify-content:center}.gsvg{position:absolute;left:160px;top:440px}
+.gv{position:absolute;left:0;right:0;top:830px;text-align:center;font-size:130px;font-weight:900;letter-spacing:-4px;line-height:1}.gl{position:absolute;left:0;right:0;top:975px;text-align:center;font-size:26px;letter-spacing:8px;color:#bfeee0;font-weight:700}
+.gch{position:absolute;left:64px;right:64px;top:1050px;justify-content:center}.shield{position:absolute;right:70px;top:150px;font-size:150px;transform:rotate(10deg);filter:drop-shadow(0 0 30px rgba(22,199,132,.6))}
+/* cards */
+.cards{background:radial-gradient(60% 40% at 50% 10%,rgba(120,60,255,.35),rgba(0,0,0,0) 70%),linear-gradient(180deg,#0b0a24,#04040f)}
+.cards .tag{background:linear-gradient(90deg,#a855f7,#6366f1);box-shadow:0 0 30px rgba(140,90,255,.55)}
+.deck{position:absolute;left:64px;right:64px;top:330px;display:flex;flex-wrap:wrap;justify-content:center;gap:24px}
+.card{width:290px;height:420px;border-radius:24px;padding:3px;background:linear-gradient(160deg,#5b8cff,#1d3fb0)}.card.c1{background:linear-gradient(160deg,#fff1a6,#e0a800 50%,#8a5a00);box-shadow:0 0 50px rgba(255,200,40,.45)}
+.card.c2{background:linear-gradient(160deg,#ffffff,#9aa6bd 50%,#56607a)}.card.c3{background:linear-gradient(160deg,#ffd2ad,#c46a2b 50%,#6a3210)}
+.ci{height:100%;border-radius:21px;background:linear-gradient(180deg,#111a3a,#070b1c);display:flex;flex-direction:column;align-items:center;padding:22px 18px;position:relative}
+.ci .rk{position:absolute;left:18px;top:14px;font-size:44px;font-weight:900;opacity:.9}.ci .cb{margin-top:46px;font-size:46px;font-weight:900;white-space:nowrap}.ci .cl{font-size:15px;letter-spacing:3px;color:#9fb2e8;font-weight:700}
+.ci .clg{height:110px;display:flex;align-items:center;justify-content:center;margin:12px 0}.ci .cst{width:100%;display:flex;justify-content:space-between;border-top:1px solid rgba(255,255,255,.12);padding-top:12px;font-size:15px;color:#9fb2e8;letter-spacing:1px}
+.ci .cst b{display:block;font-size:24px;color:#fff;letter-spacing:0;margin-top:2px}
+/* club */
+.club{background:radial-gradient(55% 40% at 50% 42%,rgba(255,190,40,.28),rgba(0,0,0,0) 70%),linear-gradient(180deg,#1a0b3a,#07041a)}
+.club .tag{background:linear-gradient(90deg,#f5c542,#ff6ec7);color:#1d0a20;box-shadow:0 0 30px rgba(255,150,200,.5)}
+.cf{position:absolute;border-radius:2px}.badge{position:absolute;left:50%;top:300px;transform:translateX(-50%);width:540px;height:540px;border-radius:50%;padding:18px;background:conic-gradient(#fff4b0,#e0a800,#fff4b0,#b07800,#fff4b0);box-shadow:0 0 80px rgba(255,200,40,.55)}
+.bin{width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 50% 35%,#2a1b5c,#0d0826);display:flex;flex-direction:column;align-items:center;justify-content:center}
+.bin b{font-size:150px;font-weight:900;letter-spacing:-5px;line-height:1;background:linear-gradient(180deg,#fff7c2,#ffd23f 50%,#e09a00);-webkit-background-clip:text;color:transparent}.bin span{font-size:40px;letter-spacing:16px;font-weight:800;color:#ffe9a6;margin-top:8px;padding-left:16px}
+.blogo{position:absolute;left:0;right:0;top:880px;display:flex;justify-content:center}.bt{position:absolute;left:0;right:0;top:1010px;text-align:center;font-size:40px;font-weight:800}.bt em{font-style:normal;color:#4dff9a}
+/* ticker */
+.ticker{background:linear-gradient(180deg,#0b0f1a,#030508)}.ticker .tag{background:linear-gradient(90deg,#39ff88,#00b86b);color:#00210f;box-shadow:0 0 30px rgba(57,255,136,.45)}
+.led{position:absolute;left:64px;right:64px;top:330px;border-radius:24px;background:#020304;border:2px solid #1f2633;box-shadow:inset 0 0 60px rgba(0,0,0,.9),0 0 50px rgba(57,255,136,.12);padding:24px 30px;
+ background-image:radial-gradient(rgba(255,255,255,.05) 1px,rgba(0,0,0,0) 1.6px);background-size:7px 7px;font-family:Menlo,"SF Mono",monospace}
+.lh{display:flex;justify-content:space-between;color:#ffb000;font-size:22px;letter-spacing:4px;text-shadow:0 0 12px rgba(255,176,0,.7);padding-bottom:14px;border-bottom:2px dashed #2a3140}
+.lr{display:grid;grid-template-columns:1fr 250px 190px;align-items:center;height:138px;border-bottom:2px dashed #1c2230}.lr:last-child{border-bottom:0}
+.lr .up{color:#39ff88;font-size:42px;font-weight:700;text-align:right;text-shadow:0 0 14px rgba(57,255,136,.8);white-space:nowrap}.lr .wr{color:#ffb000;font-size:34px;text-align:right;text-shadow:0 0 12px rgba(255,176,0,.7)}
+/* guess */
+.guess{background:radial-gradient(60% 40% at 50% 40%,rgba(0,200,255,.22),rgba(0,0,0,0) 70%),linear-gradient(180deg,#05162a,#020814)}
+.guess .tag{background:linear-gradient(90deg,#00e0ff,#7c4dff);box-shadow:0 0 30px rgba(0,200,255,.5)}
+.myst{position:absolute;left:110px;right:110px;top:330px;height:620px;border-radius:30px;background:rgba(8,20,45,.6);border:2px dashed rgba(120,200,255,.45);display:flex;flex-direction:column;align-items:center;padding-top:40px}
+.mlogo{position:relative;height:200px;display:flex;align-items:center;justify-content:center}.mlogo img{filter:blur(22px) brightness(.8);opacity:.85}
+.qm{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:210px;font-weight:900;color:#fff;text-shadow:0 0 40px rgba(0,200,255,.8)}
+.mst{margin-top:36px;display:grid;grid-template-columns:1fr 1fr;gap:18px;width:100%;padding:0 40px}.mst div{padding:18px 22px;border-radius:18px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14)}
+.mst span{display:block;font-size:17px;letter-spacing:3px;color:#a9c4ef;font-weight:700}.mst b{display:block;font-size:44px;font-weight:900;margin-top:4px;white-space:nowrap}
+.gq{position:absolute;left:0;right:0;top:1030px;text-align:center;font-size:46px;font-weight:900}"""
 CREATIVE_FIT_JS = """<script>(function(){var bad=[];document.querySelectorAll('body *').forEach(function(e){if(e.closest('.free,.art'))return;var r=e.getBoundingClientRect();
  if(r.width&&r.height&&(r.right>1081||r.left<-1||r.bottom>1351||r.top<-1))bad.push('out:'+(e.className||e.tagName))});
  var d=document.querySelector('.disc').getBoundingClientRect();document.querySelectorAll('.chips,.leg,.pod,.dots').forEach(function(e){if(e.getBoundingClientRect().bottom>d.top-6)bad.push('over disclaimer:'+e.className)});
@@ -750,7 +837,53 @@ def creative_page(a, data):
                 f'<div class="dots">{dots}</div><div class="leg"><span><i style="background:#18e0a0"></i>Win</span><span><i style="border:3px solid #ff5a5a"></i>Loss</span></div>'
                 f'<div class="chips wc"><div class="chip"><span>WIN RATE</span><b>{E(f_wr(p))}</b></div><div class="chip"><span>TOTAL ROI</span><b>{E(f_roi(p))}</b></div></div>'
                 f'{emo(SPIRIT.get(p["id"], "📊"), "spirit")}')
-    else:
+    elif L == 'race':
+        ps = [data.by_id[i] for i in a['rows']]; m = a['metric']; v = (lambda p: p['dayRoi']) if m == 'day' else (lambda p: p['allTimeRoi'])
+        lo, hi = min(map(v, ps)), max(map(v, ps))
+        lanes = ''.join(f'<div class="lane"><div class="ln">{lg(p, 56, 200)}</div>{emo("🏎️", "car", f"left:{x}px")}<div class="lv {tone(m, p)}" style="left:{x + 56}px">{E(METRIC[m][1](p))}</div></div>'
+                        for p in ps for x in [round(300 + 340 * ((v(p) - lo) / (hi - lo) if hi > lo else 1))])
+        body = (f'{top(emo("🏁") + " THE RACE")}<div class="ct">{"Today&#39;s race" if m == "day" else "The race to the top"}</div>'
+                f'<div class="cs">{"TODAY&#39;S RESULT" if m == "day" else "TOTAL ROI · ALL TIME"}</div><div class="lanes">{lanes}</div>')
+    elif L == 'vs':
+        x, y = (data.by_id[i] for i in a['rows'])
+        rows = ([('TODAY', 'dayRoi', f_day, 1)] if a['metric'] == 'day' and 'dayRoi' in x and 'dayRoi' in y else []) + [('TOTAL ROI', 'allTimeRoi', f_roi, 1), ('WIN RATE', 'winRate', f_wr, 1), ('MAX DRAWDOWN', 'drawdown', f_dd, -1)]
+        vr = ''.join(f'<div class="vr"><b class="{"win" if (x[k] - y[k]) * d > 0 else ""}">{E(fn(x))}</b><span>{lab}</span><b class="{"win" if (y[k] - x[k]) * d > 0 else ""}">{E(fn(y))}</b></div>' for lab, k, fn, d in rows)
+        body = (f'{top(emo("🥊") + " HEAD TO HEAD")}<div class="side2" style="left:64px">{lg(x, 110, 400)}<small>{E(x["strategyType"].upper())}</small></div>'
+                f'<div class="side2" style="right:64px">{lg(y, 110, 400)}<small>{E(y["strategyType"].upper())}</small></div><div class="vsb">VS</div>'
+                f'<div class="vrows">{vr}<div class="vq">Who&#39;s your pick? {emo("👇")}</div></div>')
+    elif L == 'gauge':
+        p = data.by_id[a['pid']]; t = math.pi * min(abs(p['drawdown']), 50) / 50; nx, ny = 380 - 290 * math.cos(t), 380 - 290 * math.sin(t)
+        svg = (f'<svg class="gsvg" width="760" height="450" viewBox="0 0 760 450"><defs><linearGradient id="gg" x1="0" x2="1"><stop offset="0" stop-color="#16c784"/><stop offset=".5" stop-color="#ffd000"/><stop offset="1" stop-color="#ff3b3b"/></linearGradient></defs>'
+               f'<path d="M 60 380 A 320 320 0 0 1 700 380" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="58"/><path d="M 60 380 A 320 320 0 0 1 700 380" fill="none" stroke="url(#gg)" stroke-width="44" stroke-linecap="round"/>'
+               f'<text x="60" y="440" fill="#9fd" font-size="24" font-family="-apple-system" text-anchor="middle">0%</text><text x="700" y="440" fill="#f99" font-size="24" font-family="-apple-system" text-anchor="middle">50%</text>'
+               f'<line x1="380" y1="380" x2="{nx:.0f}" y2="{ny:.0f}" stroke="#fff" stroke-width="12" stroke-linecap="round"/><circle cx="380" cy="380" r="26" fill="#fff"/></svg>')
+        body = (f'{top(emo("🛡️") + " THE CALM ONE")}<div class="ct" style="top:160px">The calm one</div>{emo("🛡️", "shield")}<div class="glogo">{lg(p, 90, 520)}</div>{svg}'
+                f'<div class="gv">{E(f_dd(p))}</div><div class="gl">DEEPEST DIP · ALL TIME</div>'
+                f'<div class="chips gch"><div class="chip"><span>WIN RATE</span><b>{E(f_wr(p))}</b></div><div class="chip"><span>TOTAL ROI</span><b style="color:#4dff9a">{E(f_roi(p))}</b></div></div>')
+    elif L == 'cards':
+        ps = [data.by_id[i] for i in a['rows']]; m = a['metric']
+        deck = ''.join(f'<div class="card c{i}"><div class="ci"><div class="rk">{i}</div><div class="cb" style="color:{"#4dff9a" if tone(m, p) == "g" else "#ff7a7a"}">{E(METRIC[m][1](p))}</div>'
+                       f'<div class="cl">{"TODAY" if m == "day" else "TOTAL ROI"}</div><div class="clg">{lg(p, 90, 240)}</div>'
+                       f'<div class="cst"><div>WIN RATE<b>{E(f_wr(p))}</b></div><div style="text-align:right">MAX DD<b>{E(f_dd(p))}</b></div></div></div></div>' for i, p in enumerate(ps, 1))
+        body = f'{top(emo("🃏") + " PICK YOUR CARD")}<div class="ct">Pick your card</div><div class="cs">{"TODAY&#39;S RESULT" if m == "day" else "TOTAL ROI · ALL TIME"}</div><div class="deck">{deck}</div>'
+    elif L == 'club':
+        p = data.by_id[a['pid']]; rnd = random.Random(a['club'] + p['id'])
+        conf = ''.join(f'<i class="cf" style="left:{rnd.randint(0, 1060)}px;top:{rnd.randint(130, 1240)}px;width:{rnd.choice([10, 14, 18])}px;height:{rnd.choice([6, 8])}px;'
+                       f'background:{rnd.choice(["#ffd23f", "#ff6ec7", "#4dff9a", "#5b8cff", "#ffffff"])};transform:rotate({rnd.randint(0, 180)}deg);opacity:.8"></i>' for _ in range(90))
+        body = (f'<div class="free">{conf}</div>{top(emo("🎉") + " MILESTONE")}<div class="ct" style="left:0;right:0;text-align:center;font-size:88px">Milestone unlocked {emo("🎉")}</div>'
+                f'<div class="badge"><div class="bin"><b>+{a["club"]}%</b><span>CLUB</span></div></div><div class="blogo">{lg(p, 100, 560)}</div>'
+                f'<div class="bt"><em>{E(f_roi(p))}</em> total ROI, all time</div>')
+    elif L == 'ticker':
+        ps = [data.by_id[i] for i in a['rows']]
+        rows = ''.join(f'<div class="lr"><div>{lg(p, 62, 300)}</div><div class="up">▲ {E(f_roi(p))}</div><div class="wr">{E(f_wr(p))}</div></div>' for p in ps)
+        body = (f'{top(emo("📟") + " THE BOARD")}<div class="ct">The board</div><div class="cs">ALL-TIME NUMBERS</div>'
+                f'<div class="led"><div class="lh"><span>STRATEGY</span><span>TOTAL ROI &nbsp;&nbsp;&nbsp;&nbsp; WIN RATE</span></div>{rows}</div>')
+    elif L == 'guess':
+        p = data.by_id[a['pid']]
+        st = ''.join(f'<div><span>{l}</span><b style="color:{c}">{E(v)}</b></div>' for l, v, c in (('TOTAL ROI', f_roi(p), '#4dff9a'), ('WIN RATE', f_wr(p), '#fff'), ('MAX DRAWDOWN', f_dd(p), '#ff7a7a'), ('STYLE', p['strategyType'], '#fff')))
+        body = (f'{top(emo("🤔") + " GUESS WHO")}<div class="ct" style="left:0;right:0;text-align:center;font-size:110px">Guess who? {emo("🤔")}</div>'
+                f'<div class="myst"><div class="mlogo">{lg(p, 150, 520)}<div class="qm">?</div></div><div class="mst">{st}</div></div><div class="gq">Drop your guess in the comments {emo("👇")}</div>')
+    elif L == 'podium':
         ps = [data.by_id[i] for i in a['rows']]; m = a['metric']
         def col(p, cls, med, rank):
             return (f'<div class="col"><div class="med emo">{med}</div><div class="lgw">{lg(p, 86, 300)}</div><div class="blk {cls}"><b>{E(METRIC[m][1](p))}</b>'
