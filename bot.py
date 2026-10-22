@@ -9,8 +9,8 @@ import autopost as A
 LOG = 'bot.log'
 pending = {}            # user id -> what their next message means
 plock = threading.Lock()
-TYPE_ROWS = [[('Results', 'n:results'), ('Weekly', 'n:weekly'), ('Highlight', 'n:highlight')],
-             [('Hype', 'n:hype'), ('Profits', 'n:profits'), ('Custom', 'n:custom')], [('Back', 'm:menu')]]
+TYPE_ROWS = [[('Daily results', 'n:results'), ('Weekly results', 'n:weekly')], [('Top performers', 'n:highlight'), ('Performance update', 'n:profits')],
+             [('Hype', 'n:hype'), ('Custom', 'n:custom')], [('Back', 'm:menu')]]
 
 def log(*a): P.log(*a, f=LOG)
 def send(chat, text, rows=None, **kw):
@@ -312,7 +312,7 @@ def unschedule(d):
 
 # ---------- onboarding: the plan in plain words, then every post format as a test ----------
 PLAN_TEXT = ("Here is the plan.\n\n"
-             "Every day, 3 posts:\n1 pm  Highlight\n5 pm  Profits\n8 pm  Results\n\n"
+             "Every day, 3 posts:\n1 pm  Top performers today\n5 pm  Performance update (one strategy)\n8 pm  Daily results (all 5)\n\n"
              "Every Sunday at 8 pm: the weekly results.\n"
              "First week (23 to 29 Oct): the 9 am post is the launch.\n\n"
              "Nothing goes out until one of you taps Approve.\n\nClear?")
@@ -321,9 +321,9 @@ SIMPLE_TEXT = ("Simple version:\n\n"
                "It sends each one to you first.\n"
                "Approve = it posts. Change = it fixes it. Reject = you make your own.\n\nClear now?")
 PLAN_ROWS = [[('✅ Yes, do it', 'o:yes'), ('❓ Not clear', 'o:no')], [('💡 Different plan', 'o:diff')]]
-FORMATS = [('launch-day1', 'Launch · day 1'), ('hype-styles', 'Hype · the lineup'), ('hype-blur', 'Hype · guess the leader'),
-           ('highlight-wr-100', 'Highlight · win rate'), ('highlight-dd-101', 'Highlight · low drawdown'), ('profits-roi-84', 'Profits · top of the board'),
-           ('results-board-roi', 'Results · daily board'), ('weekly-week1', 'Weekly results'), ('custom-example', 'Custom · your own post')]
+FORMATS = [('launch-day1', 'Launch · day 1'), ('hype-styles', 'Hype · the lineup'), ('highlight-top-roi', 'Top performers'),
+           ('profits-spot-84', 'Performance update'), ('results-index', 'Daily results (all-time until the first day result)'),
+           ('weekly-week1', 'Weekly results'), ('custom-example', 'Custom · your own post')]
 
 def onboard(uid):
     send(int(uid), PLAN_TEXT, PLAN_ROWS)
@@ -354,7 +354,7 @@ ASSISTANT = """You are Samanway's assistant on Telegram. You run the PIP Farming
 You are talking to {who} (Samanway is your boss; Johannes is Samanway's boss). Talk like a real person: warm, direct, simple English, short. Never say you are an AI or a bot.
 Write 1 to 3 very short messages (each one or two sentences), like texting.
 What you know:
-- Plan (Johannes decided it): 3 posts a day, 1 pm Highlight, 5 pm Profits, 8 pm Results. Weekly results every Sunday 8 pm. Launch week 23 to 29 Oct adds a 9 am launch post.
+- Plan (Johannes decided it): 3 posts a day, 1 pm Top performers today, 5 pm Performance update on one strategy, 8 pm Daily results of all 5. Weekly results every Sunday 8 pm. Launch week 23 to 29 Oct adds a 9 am launch post.
 - Every post comes to Johannes and Samanway first with Approve, Change, Reject. Nothing goes out without approval. If he's happy he just taps Approve and it goes out as it is.
 - The channel promotes exactly 5 strategies: Cool Wave, Glade Coms, Nightshift FX, PBS FX, Yield Engine. Never any other.
 - Posts show results in percent only, mostly the results of the day. They never mention the API, the provider, "posted every day", "no edits", dates, times or places.

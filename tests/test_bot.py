@@ -106,16 +106,16 @@ try:
     time.sleep(2)
     say('hi', who=STRANGER); ok('Your chat ID: 999' in wait(lambda s: s.get('chat_id') == STRANGER, 'stranger reply')['text'], 'stranger gets their chat id only')
     say('/start'); m = wait(lambda s: s.get('chat_id') == ADMIN and s['_m'] == 'sendMessage', 'menu'); ok('m:new' in json.dumps(m['reply_markup']), 'menu has New post')
-    # New post: Highlight with context + image -> preview document
+    # New post: Performance update with context + image -> preview document
     tap('m:new', m['_id']); wait(lambda s: 'What kind' in str(s.get('text')), 'type picker')
-    tap('n:highlight', m['_id']); wait(lambda s: 'add context' in str(s.get('text')), 'collect prompt')
+    tap('n:profits', m['_id']); wait(lambda s: 'add context' in str(s.get('text')), 'collect prompt')
     say('Focus on the calm one'); say('see this', photo=True)
     ok('1 image' in wait(lambda s: 'Got 2 notes, 1 image' in str(s.get('text')), 'counter')['text'], 'notes and images counted')
     tap('c:done', m['_id'])
     doc = wait(lambda s: s['_m'] == 'sendDocument' and s.get('chat_id') == str(ADMIN), 'draft preview')
     ok(doc['caption'] == 'Stub caption.' and 'pipfarming-' in doc['document'], 'draft preview is a full-quality document with the caption')
     did = btn(doc, 'd:post:').split(':')[2]; d = json.load(open(st('drafts', f'{did}.json')))
-    ok(d['angle_key'].startswith('dd:'), 'Claude picked the angle that matches the context (calm = drawdown)')
+    ok(d['angle_key'] == 'spot:101', 'Claude picked the strategy that matches the context (calm = lowest drawdown, PBS FX)')
     ok(os.path.getsize(d['png']) > 100000, 'draft image rendered')
     # Change
     tap(f'd:chg:{did}', doc['_id']); wait(lambda s: 'What should change' in str(s.get('text')), 'change prompt')
@@ -137,7 +137,7 @@ try:
     ok('(yours)' in pv['text'] and pv['text'].count(':00') == 4, "Today's plan lists 4 slots and the scheduled post")
     print(pv['text'])
     sw = btn(pv, 's:swap:'); k = ':'.join(sw.split(':')[2:4]); tap(sw, pv['_id']); sp = wait(lambda s: 'swap' in str(s.get('text')), 'swap menu')
-    tap(f's:to:{k}:profits', pv['_id']); pv2 = wait(lambda s: 'Profits' in str(s.get('text')) and s['_m'] == 'editMessageText', 'swapped plan')
+    tap(f's:to:{k}:profits', pv['_id']); pv2 = wait(lambda s: 'Performance update' in str(s.get('text')) and s['_m'] == 'editMessageText', 'swapped plan')
     ok(True, 'swap changes the slot type')
     sk = btn(pv2, 's:skip:'); tap(sk, pv2['_id']); pv3 = wait(lambda s: 'skipped' in str(s.get('text')), 'skip'); ok(True, 'skip from the plan')
     tap(btn(pv3, 's:unskip:'), pv3['_id']); pv4 = wait(lambda s: s['_m'] == 'editMessageText', 'restore'); ok('s:prev:' in json.dumps(pv4['reply_markup']), 'restore a skipped slot')
