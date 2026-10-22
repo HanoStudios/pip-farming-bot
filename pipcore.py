@@ -16,6 +16,7 @@ CLAUDE = os.environ.get('PIP_CLAUDE') or shutil.which('claude') or os.path.expan
 TG = os.environ.get('TELEGRAM_API') or 'https://api.telegram.org'
 CHANNEL, GROUP = '-1003897919358', '-1004472913007'
 COMMUNITY = 't.me/pipfarmingcommunity'
+PROMOTED = (84, 100, 101, 102, 103)   # the only strategies PIP Farming promotes (same 5 as Instagram); logos in brand/providers/<id>.png
 TZ = ZoneInfo('Asia/Bangkok')
 SLOTS = ['09:00', '13:00', '17:00', '20:00']
 DEFAULT_TYPE = {'09:00': 'hype', '13:00': 'highlight', '17:00': 'profits', '20:00': 'results'}
@@ -113,6 +114,10 @@ def refresh_admins():
                 u = a['user']
                 if not u.get('is_bot'): admins[str(u['id'])] = u.get('first_name') or u.get('username') or str(u['id'])
         except Exception as e: log('admins: could not read', chat, e)
+    for uid in re.findall(r'-?\d+', ENV.get('PIP_ONLY_IDS', '')):   # listed people who aren't admins: their name from their chat
+        if uid not in admins:
+            try: c = api('getChat', chat_id=int(uid)); admins[uid] = c.get('first_name') or c.get('username') or uid
+            except Exception as e: log('admins: could not read chat', uid, e)
     if admins:
         with locked(): jwrite(os.path.join(ST, 'admins.json'), {'updated': now().isoformat(), 'admins': admins})
     return allowed()
@@ -120,8 +125,8 @@ def refresh_admins():
 def allowed():
     a = dict(jread(os.path.join(ST, 'admins.json'), {}).get('admins', {}))
     for x in re.findall(r'-?\d+', ENV.get('PIP_ALLOWED_IDS', '')): a.setdefault(x, 'extra')
-    only = re.findall(r'-?\d+', ENV.get('PIP_ONLY_IDS', ''))   # set = only these people may use the bot and get previews
-    return {k: v for k, v in a.items() if k in only} if only else a
+    only = re.findall(r'-?\d+', ENV.get('PIP_ONLY_IDS', ''))   # set = exactly these people may use the bot and get previews (admins or not)
+    return {k: a.get(k, 'Teammate') for k in only} if only else a
 
 def notify_admins(text, **kw):
     sent = []
@@ -152,13 +157,24 @@ def site_inactive():
     j = jread(SITE_FILE, {}) or {}
     return {p['name'].lower().strip() for p in j.get('providers', []) if re.search('inactive', str(p.get('status', '')), re.I)}
 
+def previous_day(as_of):
+    """The last snapshot from before today (up to 3 days back): (data, date) or None."""
+    today = as_of.astimezone(TZ).date()
+    for back in (1, 2, 3):
+        j = jread(os.path.join(ST, 'snapshots', f'{today - datetime.timedelta(days=back)}.json'))
+        if j and j.get('data', {}).get('items'): return j['data'], today - datetime.timedelta(days=back)
+
 class Data:
     def __init__(self, d, as_of):
         off = site_inactive()
         self.as_of = as_of
-        self.all = d['items']
-        self.ps = [p for p in d['items'] if p.get('pnl30d') and p['name'].lower().strip() not in off]   # 0 = not trading
+        prev = previous_day(as_of); old = {q['id']: q for q in prev[0]['items']} if prev else {}
+        # today's result = change in total ROI since yesterday's last numbers (only when a snapshot from yesterday exists)
+        self.all = [dict(p, **({'dayRoi': round(p['allTimeRoi'] - old[p['id']]['allTimeRoi'], 2)} if p['id'] in old else {}))
+                    for p in d['items'] if p['id'] in PROMOTED]
+        self.ps = [p for p in self.all if p.get('pnl30d') and p['name'].lower().strip() not in off]   # 0 = not trading
         self.by_id = {p['id']: p for p in self.ps}
+        self.has_day = any(p.get('dayRoi') for p in self.ps)
     def label(self): return self.as_of.astimezone(TZ).strftime('%-d %b, %H:%M') + ' Bangkok'
 
 # ---------- number formatting + the number check ----------
@@ -166,10 +182,8 @@ def nm(p): return p['name'].replace(' - ', ' ')
 def f_roi(p): return f"{'+' if p['allTimeRoi'] >= 0 else ''}{p['allTimeRoi']:,.2f}%"
 def f_wr(p): return f"{p['winRate']:.2f}%"
 def f_dd(p): return f"-{abs(p['drawdown']):.2f}%"
-def f_pnl(p): return f"{'+' if p['pnl30d'] > 0 else ''}{p['pnl30d']:,.2f}"
-def f_tr(p): return f"{p['totalTrades']:,}"
-def f_fol(p): return f"{p['followers']:,}"
-def f_since(p): return datetime.datetime.fromisoformat(p['createdAt'].replace('Z', '+00:00')).strftime('%b %Y')
+def f_day(p): return f"{'+' if p['dayRoi'] >= 0 else ''}{p['dayRoi']:,.2f}%"
+def logo(p, cls='plogo'): return f'<img class="{cls}" src="file://{BRAND}/providers/{p["id"]}.png" alt="{E(nm(p))}">'
 
 NUM = re.compile(r'\d[\d,]*(?:\.\d+)?')
 def canon(s):
@@ -178,7 +192,7 @@ def canon(s):
 
 def allowed_numbers(values):
     """Each raw API value is allowed as written, rounded to 1 decimal and to a whole number."""
-    out = {canon(x) for x in ('1', '7', '30')}
+    out = {canon(x) for x in (*range(1, 11), 30)}   # small counts (5 strategies, number 2, 7 days)
     for v in values:
         if isinstance(v, str):
             out |= {canon(n) for n in NUM.findall(v)}
@@ -192,12 +206,29 @@ def bad_numbers(text, ok):
 def data_numbers(data, extra=()):
     vals = []
     for p in data.ps:
-        vals += [p['allTimeRoi'], p['winRate'], p['drawdown'], p['pnl30d'], p['totalTrades'], p['followers'], f_since(p)]
-    vals += [len(data.ps), sum(p['totalTrades'] for p in data.ps), sum(p['followers'] for p in data.ps), *extra]
+        vals += [p['allTimeRoi'], p['winRate'], p['drawdown']] + ([p['dayRoi']] if 'dayRoi' in p else [])
+    vals += [len(data.ps), *extra]
     return allowed_numbers(vals)
 
+def not_percent(text):
+    """Results are shown in percent only: any number not followed by % (small counts like '5 strategies' aside)."""
+    return [n for n in re.findall(r'\d[\d,]*(?:\.\d+)?(?![\d.,]*\s*%)', text or '') if not (n.isdigit() and int(n) <= 10)]
+
 BANNED = re.compile(r'\b(insane|moon\w*|guarantee\w*|risk[- ]free|passive income|lambo|skyrocket\w*|explod\w*|10x|100x|get rich|to the moon|crazy|unreal|massive|huge gains|no[- ]brainer|easy money)\b', re.I)
+# Team, 2026-10-22: never say where the numbers come from, that we post daily, "no edits", or any date, time or place
+NEVER = re.compile(r"\b(api|provider\w*|data|source\w*|every ?day|daily|no edits?|nothing edited|unedited|edit\w*|bangkok|thailand|tonight|o'?clock"
+                   r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|june|july|august|september|october|november|december"
+                   r"|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b|\b\d{1,2}(:\d\d|\s?[ap]\.?m\b)", re.I)
 EMOJI = re.compile('[\U0001F000-\U0001FAFF☀-➿⬀-⯿]')
+
+def text_problems(text, ok, what):
+    probs = []
+    if NEVER.search(text or ''): probs.append(f'{what}: never mention "{NEVER.search(text).group(0)}" (no sources, no "daily", no dates, times or places)')
+    bn = bad_numbers(text, ok)
+    if bn: probs.append(f'{what}: numbers not in the data: ' + ', '.join(bn))
+    np = not_percent(text)
+    if np: probs.append(f'{what}: results only in percent, not: ' + ', '.join(np))
+    return probs
 
 def caption_problems(cap, ok):
     probs = []
@@ -208,9 +239,7 @@ def caption_problems(cap, ok):
     if len(EMOJI.findall(cap)) > 1: probs.append('more than one emoji')
     if '#' in cap: probs.append('no hashtags')
     if re.search(r'\b[A-Z]{5,}\b', cap.replace('PIP', '')): probs.append('no all-caps words')
-    bn = bad_numbers(cap, ok)
-    if bn: probs.append('numbers not in the data: ' + ', '.join(bn))
-    return probs
+    return probs + text_problems(cap, ok, 'caption')
 
 # ---------- rotation (so posts don't repeat) ----------
 def recent(kind, n):
@@ -226,88 +255,79 @@ def pick(kind, keys, avoid):
     return next((k for k in keys if k not in used), keys[0])
 
 # ---------- angles: what a post is about (all numbers filled in by code) ----------
+def facts(p):
+    return f"total ROI {f_roi(p)}, win rate {f_wr(p)}, max drawdown {f_dd(p)}" + (f", today {f_day(p)}" if 'dayRoi' in p else '')
+
 def stat_angle(key, p, kicker, metric, head, cap, extra_brief=''):
-    big = {'since': f_since, **{k: v[1] for k, v in METRIC.items()}}[metric](p)
-    return {'key': key, 'layout': 'stat', 'kicker': kicker, 'metric': metric, 'big': big, 'pid': p['id'], 'headline': head, 'caption': cap,
-            'brief': f"{kicker.title()} spotlight on {nm(p)} ({p['strategyType']}): total ROI {f_roi(p)}, win rate {f_wr(p)}, max drawdown {f_dd(p)}, "
-                     f"30-day P&L {f_pnl(p)} (no unit, never add % or $), {f_tr(p)} trades, {f_fol(p)} people copying, live since {f_since(p)}. {extra_brief}"}
+    return {'key': key, 'layout': 'stat', 'kicker': kicker, 'metric': metric, 'big': METRIC[metric][1](p), 'pid': p['id'], 'headline': head, 'caption': cap,
+            'brief': f"{kicker.title()} spotlight on {nm(p)} ({p['strategyType']}): {facts(p)}. {extra_brief}"}
 
 def highlight_angles(data):
     ps = data.ps; out = []
-    p = max(ps, key=lambda p: p['winRate']); out.append(stat_angle(f'wr:{p["id"]}', p, 'WIN RATE', 'wr', f'{nm(p)} closes most trades green.', f'{nm(p)}: {round(p["winRate"])} out of 100 trades closed in profit.', 'Best win rate on the board.'))
+    if data.has_day:
+        p = max(ps, key=lambda p: p.get('dayRoi', -1e9)); out.append(stat_angle(f'day:{p["id"]}', p, "TODAY'S RESULT", 'day', f'{nm(p)} led the day.', f'Best result today: {nm(p)}, {f_day(p)}.', "Best result of the day."))
+    p = max(ps, key=lambda p: p['winRate']); out.append(stat_angle(f'wr:{p["id"]}', p, 'WIN RATE', 'wr', f'{nm(p)} closes most trades green.', f'{nm(p)} closes {f_wr(p)} of its trades in profit.', 'Best win rate on the board.'))
     p = min(ps, key=lambda p: p['drawdown']); out.append(stat_angle(f'dd:{p["id"]}', p, 'MAX DRAWDOWN', 'dd', f'{nm(p)} keeps it calm.', f'The lowest drawdown on the board belongs to {nm(p)}.', 'Lowest max drawdown on the board (calmest).'))
     p = max(ps, key=lambda p: p['allTimeRoi']); out.append(stat_angle(f'roi:{p["id"]}', p, 'TOTAL ROI', 'roi', f'{nm(p)}, all time.', f'Highest total ROI on the board: {nm(p)}.', 'Highest total ROI on the board.'))
-    p = max(ps, key=lambda p: p['totalTrades']); out.append(stat_angle(f'tr:{p["id"]}', p, 'TRADES CLOSED', 'trades', f'{nm(p)} never sits still.', f'{f_tr(p)} trades and counting. {nm(p)}.', 'Most trades closed on the board.'))
-    p = max(ps, key=lambda p: p['pnl30d']); out.append(stat_angle(f'm:{p["id"]}', p, '30-DAY P&L', 'pnl', f'The strongest month: {nm(p)}.', f'Strongest last 30 days on the board: {nm(p)}.', 'Highest 30-day P&L on the board.'))
-    p = max(ps, key=lambda p: p['followers'])
-    if p['followers'] >= 1000: out.append(stat_angle(f'f:{p["id"]}', p, 'PEOPLE COPYING', 'followers', f'The crowd picked {nm(p)}.', f'{f_fol(p)} people copy {nm(p)}. Here is why.', 'Most copied strategy.'))
     return out
 
 def profits_angles(data):
-    ranked = sorted(data.ps, key=lambda p: -p['pnl30d']); out = []
-    for i, p in enumerate(ranked[:4]):
-        a = stat_angle(f'pnl:{p["id"]}', p, '30-DAY P&L', 'pnl', f'{nm(p)}, last 30 days.' if i else f'Top of the month: {nm(p)}.',
-                       f'Last 30 days, {nm(p)}.' if i else f'Best 30 days on the board: {nm(p)}.', f'Rank {i+1} of {len(ranked)} by 30-day P&L.')
-        a.update(layout='profits', rank=[(q['id'], f_pnl(q)) for q in ranked[:6]]); out.append(a)
+    """Today's results when yesterday's numbers exist, else total ROI. One angle per strategy, with the ranking under it."""
+    up = any(p.get('dayRoi', 0) > 0 for p in data.ps)   # a profits post only ever features a strategy that is up
+    m, f, lab = ('day', lambda p: -p.get('dayRoi', -1e9), "today's result") if up else ('roi', lambda p: -p['allTimeRoi'], 'total ROI')
+    ranked = sorted(data.ps, key=f); out = []
+    for i, p in enumerate([q for q in ranked if m != 'day' or q.get('dayRoi', 0) > 0][:4]):
+        a = stat_angle(f'{m}:{p["id"]}', p, METRIC[m][0], m, f'Number {i+1}: {nm(p)}.' if i else f'Top of the board: {nm(p)}.',
+                       f'{nm(p)}: {METRIC[m][1](p)}.' if i else f'Top of the board: {nm(p)}, {METRIC[m][1](p)}.', f'Rank {i+1} of {len(ranked)} by {lab}.')
+        a.update(layout='profits', rank=[(q['id'], METRIC[m][1](q)) for q in ranked]); out.append(a)
     return out
 
-BOARD_SORTS = {'roi': ('TOTAL ROI', lambda p: -p['allTimeRoi']), 'wr': ('WIN RATE', lambda p: -p['winRate']),
-               'pnl': ('30-DAY P&L', lambda p: -p['pnl30d']), 'dd': ('MAX DRAWDOWN', lambda p: p['drawdown'])}
-def board_angle(data, sort, key=None, head='The numbers. Nothing else.', cap="Today's board. Live numbers, no edits.", kicker=None, blur=False):
-    lab, f = BOARD_SORTS[sort]; ps = sorted(data.ps, key=f)[:7]
+BOARD_SORTS = {'day': ("TODAY'S RESULT", lambda p: -p.get('dayRoi', -1e9)), 'roi': ('TOTAL ROI', lambda p: -p['allTimeRoi']),
+               'wr': ('WIN RATE', lambda p: -p['winRate']), 'dd': ('MAX DRAWDOWN', lambda p: p['drawdown'])}
+def board_angle(data, sort, key=None, head='The numbers. Nothing else.', cap="Today's board. Which one would you copy?", kicker=None, blur=False):
+    lab, f = BOARD_SORTS[sort]; ps = sorted(data.ps, key=f)
     top = ps[0]
     return {'key': key or f'board:{sort}', 'layout': 'board', 'sort': sort, 'kicker': kicker or f'STRATEGY INDEX · BY {lab}', 'rows': [p['id'] for p in ps],
             'headline': head, 'caption': cap, 'blur': blur,
-            'brief': f'The full board of {len(data.ps)} live strategies sorted by {lab.lower()}. Leader: {nm(top)}. Rows: ' +
-                     '; '.join(f"{nm(p)} ROI {f_roi(p)}, win {f_wr(p)}, DD {f_dd(p)}, 30-day P&L {f_pnl(p)}" for p in ps)}
+            'brief': f'The full board of {len(data.ps)} strategies sorted by {lab.lower()}. Leader: {nm(top)}. Rows: ' + '; '.join(f"{nm(p)}: {facts(p)}" for p in ps)}
 
 def results_angles(data):
-    return [board_angle(data, s) for s in ('roi', 'wr', 'pnl', 'dd')]
-
-def proof_angle(data, key='proof', head='The numbers are public.', cap='Every number comes straight from the provider. Nothing edited.'):
-    tr = sum(p['totalTrades'] for p in data.ps); fo = sum(p['followers'] for p in data.ps)
-    return {'key': key, 'layout': 'proof', 'kicker': 'PUBLIC NUMBERS', 'headline': head, 'caption': cap,
-            'cards': [(str(len(data.ps)), 'strategies live'), (f'{tr:,}', 'trades closed'), (f'{fo:,}', 'people copying')],
-            'brief': f'Proof angle: {len(data.ps)} live strategies, {tr:,} trades closed in total, {fo:,} people copying. All numbers come from the provider API, posted daily, no edits.'}
+    return [board_angle(data, s) for s in (('day',) if data.has_day else ()) + ('roi', 'wr', 'dd')]
 
 def styles_angle(data, key='styles', head=None, cap='Automated, algo or manual. Pick the style that fits you.'):
     kinds = {}
     for p in data.ps: kinds[p['strategyType']] = kinds.get(p['strategyType'], 0) + 1
     head = head or f'{len(data.ps)} strategies. {len(kinds)} styles.'
     return {'key': key, 'layout': 'styles', 'kicker': 'THE LINEUP', 'headline': head, 'caption': cap,
-            'brief': f'Meet the lineup: {len(data.ps)} live strategies in {len(kinds)} styles (' + ', '.join(f'{v} {k}' for k, v in kinds.items()) + '): ' +
-                     ', '.join(f"{nm(p)} ({p['strategyType']}, since {f_since(p)})" for p in data.ps)}
+            'brief': f'Meet the lineup: {len(data.ps)} strategies in {len(kinds)} styles (' + ', '.join(f'{v} {k}' for k, v in kinds.items()) + '): ' +
+                     ', '.join(f"{nm(p)} ({p['strategyType']})" for p in data.ps)}
 
 def community_angle(data, key='community', head='Ask the people who copy them.', cap=f'Questions about a strategy? Ask the community: {COMMUNITY}'):
     return {'key': key, 'layout': 'community', 'kicker': 'COMMUNITY', 'headline': head, 'caption': cap,
             'brief': f'Invite to the PipFarming Community group ({COMMUNITY}): talk about the strategies and the daily results with people who copy them. The caption must contain {COMMUNITY}.'}
 
 def hype_angles(data):
-    out = [proof_angle(data, head='Every number, in public.', cap='We post the numbers every day. You decide.'),
-           styles_angle(data),
-           board_angle(data, 'wr', key='blur', head='Which one would you copy?', cap='Same board, names only. Tonight at 20:00, the numbers.', kicker='GUESS THE LEADER', blur=True)]
-    old = min(data.ps, key=lambda p: p['createdAt'])
-    out.append(stat_angle(f'since:{old["id"]}', old, 'LIVE SINCE', 'since', f'{nm(old)} has the longest record.', f'Live since {f_since(old)}. {nm(old)} has the longest track record here.', 'Longest track record on the board.'))
-    p = max(data.ps, key=lambda p: p['followers'])
-    if p['followers'] >= 1000: out.append(stat_angle(f'crowd:{p["id"]}', p, 'PEOPLE COPYING', 'followers', f'{f_fol(p)} people chose this one.', f'{f_fol(p)} people copy {nm(p)}. Worth a look.', 'Social proof: most copied strategy.'))
-    out[2]['caption'] = 'Same board, numbers hidden. The full board drops tonight.'
-    return out
+    return [styles_angle(data),
+            board_angle(data, 'wr', key='blur', head='Which one would you copy?', cap='Same board, numbers hidden. The full board drops later.', kicker='GUESS THE LEADER', blur=True),
+            community_angle(data)]
 
 def launch_angle(data, day):
     if day == 1:
         a = board_angle(data, 'roi', key='launch1', head="Something's live.", cap="Something's live. The numbers start tomorrow.", kicker='PIP FARMING RESULTS', blur=True)
-        a['brief'] = f'Launch day 1 teaser: the channel is live. {len(data.ps)} copy-trading strategies, real numbers, posted every day. The image shows the board with the numbers blurred. Classy, curious, short.'
+        a['brief'] = f'Launch day 1 teaser: the channel is live. {len(data.ps)} copy-trading strategies, real results. The image shows the board with the numbers blurred. Classy, curious, short.'
         a['layout'] = 'teaser'; return a
     if day == 2: return styles_angle(data, key='launch2', cap='Meet the lineup. One strategy at a time this week.')
     if day == 3:
         p = max(data.ps, key=lambda p: p['allTimeRoi'])
         return stat_angle('launch3', p, 'STRATEGY REVEAL', 'roi', f'First reveal: {nm(p)}.', f'First reveal: {nm(p)}. Total ROI, all time.', 'Launch week reveal 1: the highest total ROI. The big number is total ROI.')
-    if day == 4: return proof_angle(data, key='launch4')
+    if day == 4:
+        p = max(data.ps, key=lambda p: p['winRate'])
+        return stat_angle('launch4', p, 'STRATEGY REVEAL', 'wr', f'{nm(p)} wins most trades.', f'{nm(p)} closes {f_wr(p)} of its trades in profit.', 'Launch week reveal 2: the best win rate. The big number is win rate.')
     if day == 5:
         p = min(data.ps, key=lambda p: p['drawdown'])
-        return stat_angle('launch5', p, 'STRATEGY REVEAL', 'dd', f'The calm one: {nm(p)}.', f'Not every strategy needs to be loud. {nm(p)}.', 'Launch week reveal 2: the lowest max drawdown. The big number is max drawdown.')
+        return stat_angle('launch5', p, 'STRATEGY REVEAL', 'dd', f'The calm one: {nm(p)}.', f'Not every strategy needs to be loud. {nm(p)}.', 'Launch week reveal 3: the lowest max drawdown. The big number is max drawdown.')
     if day == 6: return community_angle(data, key='launch6')
-    return board_angle(data, 'roi', key='launch7', head='One week in.', cap='One week in. Here is the full board, same as every day.', kicker='LAUNCH WEEK · DAY 7')
+    return board_angle(data, 'roi', key='launch7', head='One week in.', cap='One week in. Here is the full board.', kicker='LAUNCH WEEK · DAY 7')
 
 def weekly_angle(data, old=None):
     """Week over week from the daily snapshots. Without a snapshot 7+ days old: the board titled Week 1."""
@@ -316,21 +336,21 @@ def weekly_angle(data, old=None):
         f = os.path.join(ST, 'snapshots', f'{today - datetime.timedelta(days=back)}.json')
         if os.path.exists(f): old = (jread(f)['data'], today - datetime.timedelta(days=back)); break
     if not old:
-        a = board_angle(data, 'roi', key='week1', head='Week 1.', cap='Week 1 on the board. Next Sunday, the first week-over-week.', kicker='WEEKLY RESULTS')
-        a['brief'] = 'Weekly results, first week (no older data to compare yet). ' + a['brief']; return a
+        a = board_angle(data, 'roi', key='week1', head='Week 1.', cap='Week 1 on the board. Who would you copy?', kicker='WEEKLY RESULTS')
+        a['brief'] = 'Weekly results, first week (no older numbers to compare yet). ' + a['brief']; return a
     prev = {p['id']: p for p in old[0]['items']}; rows = []; extra = []
     for p in data.ps:
         q = prev.get(p['id'])
         if q:
-            d_roi = round(p['allTimeRoi'] - q['allTimeRoi'], 2); d_tr = p['totalTrades'] - q['totalTrades']
-            rows.append({'id': p['id'], 'd_roi': d_roi, 'd_tr': d_tr}); extra += [d_roi, d_tr]
-        else: rows.append({'id': p['id'], 'd_roi': None, 'd_tr': None})
+            d_roi = round(p['allTimeRoi'] - q['allTimeRoi'], 2)
+            rows.append({'id': p['id'], 'd_roi': d_roi}); extra += [d_roi]
+        else: rows.append({'id': p['id'], 'd_roi': None})
     rows.sort(key=lambda r: -(r['d_roi'] if r['d_roi'] is not None else -1e9))
     best = data.by_id[rows[0]['id']]
-    return {'key': 'weekly', 'layout': 'weekly', 'kicker': 'WEEKLY RESULTS · WEEK OVER WEEK', 'rows': rows[:7], 'since': old[1].strftime('%-d %b'),
+    return {'key': 'weekly', 'layout': 'weekly', 'kicker': 'WEEKLY RESULTS · THIS WEEK', 'rows': rows,
             'headline': 'The week, in numbers.', 'caption': f'This week on the board. {nm(best)} moved the most.', 'extra': extra,
-            'brief': f'Week over week since {old[1]:%-d %b}. Change in total ROI in percentage points (pts) and trades closed this week: ' +
-                     '; '.join(f"{nm(data.by_id[r['id']])}: " + (f"ROI {r['d_roi']:+,.2f} pts, {r['d_tr']:+,} trades" if r['d_roi'] is not None else 'new this week') for r in rows)}
+            'brief': 'This week: change in total ROI over the last 7 days (in %): ' +
+                     '; '.join(f"{nm(data.by_id[r['id']])}: " + (f"{r['d_roi']:+,.2f}%" if r['d_roi'] is not None else 'new this week') for r in rows)}
 
 def angles_for(kind, data, day=None):
     return {'highlight': highlight_angles, 'profits': profits_angles, 'results': results_angles, 'hype': hype_angles,
@@ -339,7 +359,7 @@ def angles_for(kind, data, day=None):
 def auto_angle(kind, data, day=None):
     angs = angles_for(kind, data, day)
     if kind == 'highlight':   # rotate the kind of stat, not just the strategy
-        used = [k.split(':')[0] for k in recent('highlight', 4)]
+        used = [k.split(':')[0] for k in recent('highlight', len(angs) - 1)]
         return next((a for a in angs if a['key'].split(':')[0] not in used), angs[0])
     if kind == 'profits':
         used = recent('profits', 2); return next((a for a in angs if a['key'] not in used), angs[0])
@@ -349,11 +369,13 @@ def auto_angle(kind, data, day=None):
     return angs[0]
 
 # ---------- copy: Claude writes the headline + caption, the code checks them ----------
-STYLE = """You write for the PIP Farming Results Telegram channel (copy-trading strategies, live numbers from the provider API).
-Caption rules: ONE short line (max ~70 characters), sounds like a person texting a friend, not a report. Never mention the API, data, sources, rankings like "2 of 7", or strategy types in brackets. Max one number. Simple, calm, confident. Use psychology quietly: curiosity, proof, social proof.
+STYLE = """You write for the PIP Farming Results Telegram channel. It shows the results of 5 copy-trading strategies: Cool Wave, Glade Coms, Nightshift FX, PBS FX, Yield Engine.
+Caption rules: ONE short line (max ~70 characters), sounds like a person texting a friend, not a report. Max one number. Simple, calm, confident. Talk about the results: who did well, by how much. Use psychology quietly: curiosity, proof.
+Never mention: the API, the provider, data, sources, "straight from", "live from", "posted every day", "daily", "no edits", "nothing edited", any date, weekday, time of day or place (no "Bangkok", no "20:00", no "tonight at"). No rankings like "2 of 5", no strategy types in brackets.
 No hype words (insane, moon, guaranteed, risk-free, passive income, crazy, massive, easy money). No hashtags, no all caps, at most one emoji (prefer none).
-Never promise future profit. Numbers: only ones given in the facts, copied exactly as written (or rounded to a whole number). Never add % or $ to 30-day P&L.
-Headline (goes on the image): max 7 words, sentence case, calm, ends with a full stop. It should not repeat the caption."""
+Vary the wording from post to post; no filler like "quietly", "worth a look", "sitting at", "doing its thing", "keeps building".
+Never promise future profit. Numbers: results in percent only (never trade counts, follower counts or money), and only numbers given in the facts, copied exactly as written with their % sign.
+Headline (goes on the image): max 7 words, sentence case, calm, ends with a full stop. Same rules. It should not repeat the caption."""
 
 def guide_rules():
     f = os.path.join(ST, 'guide.md')
@@ -380,19 +402,18 @@ def claude_json(prompt, schema, images=(), timeout=180, model='sonnet'):
 COPY_SCHEMA = {'type': 'object', 'properties': {'angle': {'type': 'string'}, 'headline': {'type': 'string'}, 'caption': {'type': 'string'}}, 'required': ['angle', 'headline', 'caption']}
 CUSTOM_SCHEMA = {'type': 'object', 'properties': {
     'kicker': {'type': 'string'}, 'headline': {'type': 'string'}, 'body': {'type': 'string'}, 'caption': {'type': 'string'},
-    'stats': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'metric': {'type': 'string', 'enum': ['roi', 'wr', 'dd', 'pnl', 'trades', 'followers']}}, 'required': ['id', 'metric']}}},
+    'stats': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'metric': {'type': 'string', 'enum': ['roi', 'wr', 'dd', 'day']}}, 'required': ['id', 'metric']}}},
     'required': ['kicker', 'headline', 'body', 'caption', 'stats']}
 
 def write_copy(kind, angles, data, context='', images=(), prev=None, note='', ok=None):
     """Returns (angle, headline, caption, extra) — Claude's text if it passes the checks, else the angle's own safe text."""
     rules = guide_rules(); caps = recent('captions', 12)
     base = STYLE + ('\nTeam rules (always follow):\n' + '\n'.join(f'- {r}' for r in rules) if rules else '') + \
-        ('\nRecent captions (do not repeat their wording):\n' + '\n'.join(f'- {c}' for c in caps) if caps else '') + \
-        f"\nData as of {data.label()}."
+        ('\nRecent captions (do not repeat their wording):\n' + '\n'.join(f'- {c}' for c in caps) if caps else '')
     if kind == 'custom':
-        facts = '\n'.join(f"id {p['id']}: {nm(p)} ({p['strategyType']}) ROI {f_roi(p)}, win {f_wr(p)}, DD {f_dd(p)}, 30-day P&L {f_pnl(p)}, trades {f_tr(p)}, copying {f_fol(p)}" for p in data.ps)
+        lines = '\n'.join(f"id {p['id']}: {nm(p)} ({p['strategyType']}) {facts(p)}" for p in data.ps)
         task = (f"Make a custom post from the team's notes.\nTeam notes:\n{context or '(none)'}\n" + (f"Images from the team (look at them with Read): {', '.join(images)}\n" if images else '') +
-                f"Live strategies (the only numbers you may use):\n{facts}\n"
+                f"The strategies (the only numbers you may use):\n{lines}\n"
                 "Write: kicker (2-4 word uppercase label), headline (max 7 words), body (one or two short sentences, max 150 characters, no numbers unless from the data), "
                 "caption (one line), stats (0-3 numbers to show as cards, as {id, metric}; use none if they don't fit the message).")
         schema = CUSTOM_SCHEMA
@@ -411,13 +432,13 @@ def write_copy(kind, angles, data, context='', images=(), prev=None, note='', ok
             log('copy: claude failed:', e); break
         if kind == 'custom':
             text = ' '.join([out.get('kicker', ''), out.get('headline', ''), out.get('body', '')])
-            probs = caption_problems(out.get('caption', ''), ok) + [f'numbers not in the data: {n}' for n in bad_numbers(text, ok)]
+            probs = caption_problems(out.get('caption', ''), ok) + text_problems(text, ok, 'image text')
             if len(out.get('headline', '')) > 60: probs.append('headline too long')
-            stats = [s for s in out.get('stats', []) if s.get('id') in data.by_id][:3]
+            stats = [s for s in out.get('stats', []) if s.get('id') in data.by_id and s.get('metric') in METRIC and (s['metric'] != 'day' or 'dayRoi' in data.by_id[s['id']])][:3]
             if not probs: return None, out['headline'].strip(), out['caption'].strip(), {'kicker': out['kicker'].strip().upper()[:40], 'body': out['body'].strip(), 'stats': stats}
         else:
             ang = next((a for a in angles if a['key'] == out.get('angle')), fallback)
-            probs = caption_problems(out.get('caption', ''), ok) + [f'headline: numbers not in the data: {n}' for n in bad_numbers(out.get('headline', ''), ok)]
+            probs = caption_problems(out.get('caption', ''), ok) + text_problems(out.get('headline', ''), ok, 'headline')
             if len(out.get('headline', '')) > 60: probs.append('headline too long (max 7 words)')
             if ang['key'].endswith('community') and COMMUNITY not in out.get('caption', ''): probs.append(f'caption must contain {COMMUNITY}')
             if not probs: return ang, out['headline'].strip(), out['caption'].strip(), {}
@@ -472,6 +493,9 @@ h1{margin:16px 0 0;font-size:76px;line-height:1.04;font-weight:800;letter-spacin
 .img{margin-top:30px;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:18px;overflow:hidden}
 .img img{max-width:100%;max-height:100%;border-radius:18px;object-fit:contain}
 .teaser h1{font-size:120px;max-height:260px;letter-spacing:-4px}
+.plogo{display:block;width:auto;height:auto;max-height:64px;max-width:250px}
+.who .plogo{max-height:150px;max-width:600px}.li .plogo{max-height:46px;max-width:210px}.nm .plogo{max-width:100%}.styles .c .plogo{max-height:84px;max-width:400px}
+.cards.n3 .c{padding:24px 26px}.cards.n3 .c b{font-size:44px}
 """
 
 FIT_JS = """<script>
@@ -487,47 +511,43 @@ FIT_JS = """<script>
 
 E = html.escape
 def card(v, lab, cls=''): return f'<div class="c glass"><b class="{cls}">{E(v)}</b><span>{E(lab)}</span></div>'
-METRIC = {'roi': ('TOTAL ROI', f_roi, 'g'), 'wr': ('WIN RATE', f_wr, ''), 'dd': ('MAX DRAWDOWN', f_dd, 'r'), 'pnl': ('30-DAY P&L', f_pnl, 'g'),
-          'trades': ('TOTAL TRADES', f_tr, ''), 'followers': ('PEOPLE COPYING', f_fol, '')}
+METRIC = {'day': ("TODAY'S RESULT", f_day, 'g'), 'roi': ('TOTAL ROI', f_roi, 'g'), 'wr': ('WIN RATE', f_wr, ''), 'dd': ('MAX DRAWDOWN', f_dd, 'r')}
+def tone(m, p): return ('g' if p['dayRoi'] >= 0 else 'r') if m == 'day' else METRIC[m][2]
 
 def body_html(a, data, headline, extra):
     L = a.get('layout'); hl = f'<h1 data-fit="44">{E(headline)}</h1>'
     if L in ('stat', 'profits'):
-        p = data.by_id[a['pid']]; green = a.get('metric') in ('roi', 'wr', 'pnl')
+        p = data.by_id[a['pid']]; green = tone(a['metric'], p) == 'g' and a['metric'] != 'dd'
         top = f'<div class="k">{E(a["kicker"])}</div><div class="big{"" if green else " w"}" data-fit="90">{E(a["big"])}</div>{hl}' \
-              f'<div class="who">{E(nm(p))}<span class="chip">{E(p["strategyType"])}</span></div><div class="fill"></div>'
+              f'<div class="who">{logo(p)}<span class="chip">{E(p["strategyType"])}</span></div><div class="fill"></div>'
         if L == 'profits':
-            lis = ''.join(f'<div class="li{" on" if pid == a["pid"] else ""}"><div class="rk">{i+1}</div><div class="nm">{E(nm(data.by_id[pid]))}</div><div class="v">{E(v)}</div></div>' for i, (pid, v) in enumerate(a['rank']))
-            return top + f'<div class="k" style="font-size:20px">30-DAY P&amp;L RANKING</div><div class="lst glass">{lis}</div>'
-        keys = [k for k in ('roi', 'wr', 'dd', 'pnl', 'trades') if k != a.get('metric')][:4]
-        cards = [card(METRIC[k][1](p), METRIC[k][0], METRIC[k][2]) for k in keys]
-        return top + f'<div class="cards">{"".join(cards)}</div>'
+            lis = ''.join(f'<div class="li{" on" if pid == a["pid"] else ""}"><div class="rk">{i+1}</div><div class="nm">{logo(data.by_id[pid])}</div><div class="v">{E(v)}</div></div>' for i, (pid, v) in enumerate(a['rank']))
+            return top + f'<div class="k" style="font-size:20px">{E(METRIC[a["metric"]][0])} · RANKING</div><div class="lst glass">{lis}</div>'
+        keys = [k for k in ('day', 'roi', 'wr', 'dd') if k != a['metric'] and (k != 'day' or 'dayRoi' in p)]
+        cards = [card(METRIC[k][1](p), METRIC[k][0], tone(k, p)) for k in keys]
+        return top + f'<div class="cards n{len(cards)}" style="grid-template-columns:repeat({len(cards)},1fr)">{"".join(cards)}</div>'
     if L in ('board', 'teaser'):
-        s = a['sort']; order = [s] + [x for x in ('roi', 'wr', 'dd', 'pnl') if x != s][:2]
-        cols = {'roi': ('TOTAL ROI', f_roi, 'g'), 'wr': ('WIN RATE', f_wr, ''), 'dd': ('MAX DD', f_dd, 'r'), 'pnl': ('30D P&L', f_pnl, 'g')}
-        hd = '<div>#</div><div>STRATEGY</div>' + ''.join(f'<div class="{"lead" if i == 0 else ""}">{E(cols[c][0])}</div>' for i, c in enumerate(order))
-        rows = ''.join(f'<div class="row"><div class="rk">{i+1}</div><div class="nm">{E(nm(data.by_id[pid]))}<span>{E(data.by_id[pid]["strategyType"])}</span></div>' +
-                       ''.join(f'<div class="num {cols[c][2]}{" lead" if j == 0 else ""}">{E(cols[c][1](data.by_id[pid]))}</div>' for j, c in enumerate(order)) + '</div>'
+        s = a['sort']; order = [s] + [x for x in ('roi', 'day', 'wr', 'dd') if x != s and (x != 'day' or data.has_day)][:2]   # long total ROI never in the narrow last column
+        cols = {'day': 'TODAY', 'roi': 'TOTAL ROI', 'wr': 'WIN RATE', 'dd': 'MAX DD'}
+        hd = '<div>#</div><div>STRATEGY</div>' + ''.join(f'<div class="{"lead" if i == 0 else ""}">{E(cols[c])}</div>' for i, c in enumerate(order))
+        rows = ''.join(f'<div class="row"><div class="rk">{i+1}</div><div class="nm">{logo(data.by_id[pid])}<span>{E(data.by_id[pid]["strategyType"])}</span></div>' +
+                       ''.join(f'<div class="num {tone(c, data.by_id[pid])}{" lead" if j == 0 else ""}">{E(METRIC[c][1](data.by_id[pid]))}</div>' for j, c in enumerate(order)) + '</div>'
                        for i, pid in enumerate(a['rows']))
-        sub = '<div class="sub">Real strategies. Real numbers. Posted every day.</div>' if L == 'teaser' else ''
+        sub = '<div class="sub">Real strategies. Real results.</div>' if L == 'teaser' else ''
         return f'<div class="k">{E(a["kicker"])}</div>{hl}{sub}<div class="tbl glass{" blur" if a.get("blur") else ""}"><div class="hd">{hd}</div><div class="rows">{rows}</div></div>'
     if L == 'weekly':
-        hd = '<div>#</div><div>STRATEGY</div><div class="lead">ROI CHANGE</div><div>TOTAL ROI</div><div>TRADES</div>'
+        hd = '<div>#</div><div>STRATEGY</div><div class="lead">THIS WEEK</div><div>TOTAL ROI</div><div>WIN RATE</div>'
         rows = ''
         for i, r in enumerate(a['rows']):
             p = data.by_id[r['id']]
-            ch = f'{r["d_roi"]:+,.2f}<small>pts</small>' if r['d_roi'] is not None else 'New'
-            tr = f'{r["d_tr"]:+,}' if r['d_tr'] is not None else '–'
-            rows += f'<div class="row"><div class="rk">{i+1}</div><div class="nm">{E(nm(p))}<span>{E(p["strategyType"])}</span></div><div class="lead {"g" if (r["d_roi"] or 0) >= 0 else "r"}">{ch}</div><div>{E(f_roi(p))}</div><div>{E(tr)}</div></div>'
-        return f'<div class="k">{E(a["kicker"])}</div>{hl}<div class="sub">Change since {E(a["since"])}. Trades closed this week.</div><div class="tbl glass wk"><div class="hd">{hd}</div><div class="rows">{rows}</div></div>'
-    if L == 'proof':
-        cs = ''.join(f'<div class="c glass"><b>{E(v)}</b><span>{E(l)}</span></div>' for v, l in a['cards'])
-        return f'<div class="k">{E(a["kicker"])}</div>{hl}<div class="proof">{cs}</div><div class="sub">Straight from the provider API. Posted every day. No edits.</div>'
+            ch = f'{r["d_roi"]:+,.2f}%' if r['d_roi'] is not None else 'New'
+            rows += f'<div class="row"><div class="rk">{i+1}</div><div class="nm">{logo(p)}<span>{E(p["strategyType"])}</span></div><div class="lead {"g" if (r["d_roi"] or 0) >= 0 else "r"}">{ch}</div><div>{E(f_roi(p))}</div><div>{E(f_wr(p))}</div></div>'
+        return f'<div class="k">{E(a["kicker"])}</div>{hl}<div class="sub">Change in total ROI over the last 7 days.</div><div class="tbl glass wk"><div class="hd">{hd}</div><div class="rows">{rows}</div></div>'
     if L == 'styles':
-        cs = ''.join(f'<div class="c glass"><b class="nm">{E(nm(p))}</b><span>{E(p["strategyType"].upper())} · SINCE {E(f_since(p).upper())}</span></div>' for p in data.ps[:8])
-        return f'<div class="k">{E(a["kicker"])}</div>{hl}<div class="styles">{cs}</div><div class="sub">One board, every strategy, updated daily.</div>'
+        cs = ''.join(f'<div class="c glass">{logo(p)}<span>{E(p["strategyType"].upper())}</span></div>' for p in data.ps)
+        return f'<div class="k">{E(a["kicker"])}</div>{hl}<div class="styles">{cs}</div>'
     if L == 'community':
-        items = ''.join(f'<div class="c glass"><i>—</i>{E(t)}</div>' for t in ('Questions about a strategy', 'The daily results, talked through', 'People who copy them, not bots'))
+        items = ''.join(f'<div class="c glass"><i>—</i>{E(t)}</div>' for t in ('Questions about a strategy', "Today's results, talked through", 'People who copy them, not bots'))
         return f'<img class="mark" src="file://{BRAND}/mark.png"><div class="k">{E(a["kicker"])}</div>{hl}<div class="inv">{items}</div><div class="link">{E(COMMUNITY)}</div>'
     if L == 'custom':
         out = f'<div class="k">{E(extra.get("kicker") or "PIP FARMING")}</div>{hl}'
@@ -537,16 +557,15 @@ def body_html(a, data, headline, extra):
         else: out += '<div class="fill"></div>'
         stats = extra.get('stats') or []
         if stats:
-            cs = ''.join(card(METRIC[s['metric']][1](data.by_id[s['id']]), f"{nm(data.by_id[s['id']]).upper()} · {METRIC[s['metric']][0]}", METRIC[s['metric']][2]) for s in stats)
+            cs = ''.join(card(METRIC[s['metric']][1](data.by_id[s['id']]), f"{nm(data.by_id[s['id']]).upper()} · {METRIC[s['metric']][0]}", tone(s['metric'], data.by_id[s['id']])) for s in stats)
             out += f'<div class="cards" style="margin-top:24px;grid-template-columns:repeat({len(stats)},1fr)">{cs}</div>'.replace('<span>', '<span style="font-size:15px;letter-spacing:2px">')
         return out
     raise ValueError(f'unknown layout {L}')
 
 def page_html(a, data, headline, extra):
-    day = now().strftime('%-d %b %Y')
-    cls = 'teaser' if a.get('layout') == 'teaser' else ''
+    cls = 'teaser' if a.get('layout') == 'teaser' else ''   # no date, time or place on any post (team, 2026-10-22)
     return (f'<!doctype html><html><head><meta charset="utf-8"><style>{CSS}</style></head><body class="{cls}"><div class="bg"></div><div class="page">'
-            f'<header><img class="logo" src="file://{BRAND}/logo-full.png"><div class="date">{day}</div></header>'
+            f'<header><img class="logo" src="file://{BRAND}/logo-full.png"></header>'
             f'<main>{body_html(a, data, headline, extra)}</main>'
             f'<footer><div class="disc"><b>Disclaimer:</b> {DISCLAIMER}</div></footer>'
             f'</div>{FIT_JS}</body></html>')

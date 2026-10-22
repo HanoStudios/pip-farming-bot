@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STUDIO = os.path.expanduser('~/Desktop/Levels Socials Studio/statics/data')
+if not os.path.exists(os.path.join(STUDIO, 'providers-api.json')): STUDIO = os.path.join(SRC, 'data')   # this repo's last fetch
 SB = tempfile.mkdtemp(prefix='pip-test-'); print('sandbox:', SB)
 for f in ('pipcore.py', 'autopost.py', 'bot.py'): shutil.copy(os.path.join(SRC, f), SB)
 shutil.copytree(os.path.join(SRC, 'brand'), os.path.join(SB, 'brand'))
@@ -19,7 +20,7 @@ def write_data(hours_old):
     raw['data']['asOf'] = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours_old)).strftime('%Y-%m-%dT%H:%M:%SZ')
     json.dump(raw, open(os.path.join(DATA, 'providers-api.json'), 'w'))
 write_data(1)
-shutil.copy(os.path.join(STUDIO, 'providers-live.json'), DATA)
+if os.path.exists(os.path.join(STUDIO, 'providers-live.json')): shutil.copy(os.path.join(STUDIO, 'providers-live.json'), DATA)
 STUB = os.path.join(SB, 'claude-stub.py')
 open(STUB, 'w').write(r'''#!/usr/bin/env python3
 import sys, json, re

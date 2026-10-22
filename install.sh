@@ -26,7 +26,10 @@ launchctl bootout "gui/$(id -u)/com.pipfarming.$1" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$LA/com.pipfarming.$1.plist"
 echo "loaded com.pipfarming.$1"
 }
-at() { printf '<key>StartCalendarInterval</key><array>'; for t in "$@"; do printf '<dict><key>Hour</key><integer>%s</integer><key>Minute</key><integer>%s</integer></dict>' "${t%:*}" "${t#*:}"; done; printf '</array>'; }
+at() {   # Bangkok times, converted to this Mac's clock (launchd fires on local time). Re-run after changing the Mac's time zone.
+  set -- $("$PY" -c 'import sys, datetime as D; from zoneinfo import ZoneInfo
+for t in sys.argv[1:]: h, m = map(int, t.split(":")); d = D.datetime.combine(D.date.today(), D.time(h, m), ZoneInfo("Asia/Bangkok")).astimezone(); print(f"{d.hour}:{d.minute}")' "$@")
+  printf '<key>StartCalendarInterval</key><array>'; for t in "$@"; do printf '<dict><key>Hour</key><integer>%s</integer><key>Minute</key><integer>%s</integer></dict>' "${t%:*}" "${t#*:}"; done; printf '</array>'; }
 plist bot  "<string>$HERE/bot.py</string>" '<key>KeepAlive</key><true/><key>RunAtLoad</key><true/>'
 plist prep "<string>$HERE/autopost.py</string><string>prep</string>" "$(at 8:30 12:30 16:30 19:30)"
 plist post "<string>$HERE/autopost.py</string><string>post</string>" "$(at 9:00 13:00 17:00 20:00)"

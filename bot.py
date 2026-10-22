@@ -321,8 +321,8 @@ SIMPLE_TEXT = ("Simple version:\n\n"
                "It sends each one to you first.\n"
                "Approve = it posts. Change = it fixes it. Reject = you make your own.\n\nClear now?")
 PLAN_ROWS = [[('✅ Yes, do it', 'o:yes'), ('❓ Not clear', 'o:no')], [('💡 Different plan', 'o:diff')]]
-FORMATS = [('launch-day1', 'Launch · day 1'), ('hype-proof', 'Hype · proof'), ('hype-crowd-56', 'Hype · people copying'),
-           ('highlight-wr-100', 'Highlight · win rate'), ('highlight-dd-56', 'Highlight · low drawdown'), ('profits-pnl-84', 'Profits · 30 days'),
+FORMATS = [('launch-day1', 'Launch · day 1'), ('hype-styles', 'Hype · the lineup'), ('hype-blur', 'Hype · guess the leader'),
+           ('highlight-wr-100', 'Highlight · win rate'), ('highlight-dd-101', 'Highlight · low drawdown'), ('profits-roi-84', 'Profits · top of the board'),
            ('results-board-roi', 'Results · daily board'), ('weekly-week1', 'Weekly results'), ('custom-example', 'Custom · your own post')]
 
 def onboard(uid):
@@ -356,7 +356,8 @@ Write 1 to 3 very short messages (each one or two sentences), like texting.
 What you know:
 - Plan (Johannes decided it): 3 posts a day, 1 pm Highlight, 5 pm Profits, 8 pm Results. Weekly results every Sunday 8 pm. Launch week 23 to 29 Oct adds a 9 am launch post.
 - Every post comes to Johannes and Samanway first with Approve, Change, Reject. Nothing goes out without approval. If he's happy he just taps Approve and it goes out as it is.
-- All numbers come live from the Levels Socials provider API. Strategies: Cool Wave, PBS FX, Nightshift FX, Glade Coms, Yield Engine, Aurix Pulse, A Little Fox.
+- The channel promotes exactly 5 strategies: Cool Wave, Glade Coms, Nightshift FX, PBS FX, Yield Engine. Never any other.
+- Posts show results in percent only, mostly the results of the day. They never mention the API, the provider, "posted every day", "no edits", dates, times or places.
 - You can make a post for him any time: he says what it should be about, you make it, he can change anything, then approve.
 Goals in this chat: confirm the plan is final, find out what else he needs from the automation, and make posts when he asks.
 If he asks for a post (or describes one), set action to "make_post" with type (results, highlight, hype, profits, weekly, custom) and notes = what he wants.

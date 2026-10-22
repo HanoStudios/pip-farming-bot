@@ -177,7 +177,7 @@ def dry(use_claude=False):
     jobs += [('launch', P.launch_angle(data, n)) for n in range(1, 8)]
     jobs += [('weekly', P.weekly_angle(data))]
     # layout check for a real week-over-week board: SYNTHETIC previous week (numbers lowered a little), never posted
-    fake = {'items': [dict(p, allTimeRoi=p['allTimeRoi'] * 0.97 - 1, totalTrades=int(p['totalTrades'] * 0.95)) for p in data.all[:-1]]}
+    fake = {'items': [dict(p, allTimeRoi=p['allTimeRoi'] * 0.97 - 1) for p in data.all[:-1]]}
     jobs += [('weekly', dict(P.weekly_angle(data, old=(fake, data.as_of.date() - datetime.timedelta(days=7))), key='layout-test-synthetic'))]
     ok = P.data_numbers(data, sum((a.get('extra', []) for _, a in jobs), []))
     res = []
@@ -187,9 +187,11 @@ def dry(use_claude=False):
             a2, head, cap, extra = P.write_copy(kind, [a], data, ok=ok)
         name = f"{kind}{'-day' + a['key'][-1] if kind == 'launch' else ''}-{a['key'].replace(':', '-')}.png" if kind != 'launch' else f"launch-day{a['key'][-1]}.png"
         png = os.path.join(out, name)
-        try: P.render(P.page_html(a, data, head, extra), png); res.append(f'ok   {name} | {cap}')
+        probs = P.caption_problems(cap, ok) + P.text_problems(head, ok, 'headline')
+        if probs: res.append(f'FAIL {name}: {"; ".join(probs)} | {head} | {cap}'); continue
+        try: P.render(P.page_html(a, data, head, extra), png); res.append(f'ok   {name} | {head} | {cap}')
         except Exception as e: res.append(f'FAIL {name}: {e}')
-    custom = {'kicker': 'BEHIND THE BOARD', 'body': 'Every number on this channel comes from the provider API, the moment we post it.', 'stats': [{'id': data.ps[0]['id'], 'metric': 'roi'}, {'id': data.ps[1]['id'], 'metric': 'wr'}],
+    custom = {'kicker': 'BEHIND THE BOARD', 'body': 'Five strategies, one board. Results in percent, nothing else.', 'stats': [{'id': data.ps[0]['id'], 'metric': 'roi'}, {'id': data.ps[1]['id'], 'metric': 'wr'}],
               'image': os.path.join(P.BRAND, 'avatar.png')}
     try: P.render(P.page_html({'key': 'custom', 'layout': 'custom'}, data, 'How we pick what to show.', custom), os.path.join(out, 'custom-example.png')); res.append('ok   custom-example.png')
     except Exception as e: res.append(f'FAIL custom-example.png: {e}')
