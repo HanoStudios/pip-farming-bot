@@ -21,7 +21,7 @@ TZ = ZoneInfo('Asia/Bangkok')
 SLOTS = ['09:00', '13:00', '17:00', '20:00']
 DEFAULT_TYPE = {'09:00': 'hype', '13:00': 'highlight', '17:00': 'profits', '20:00': 'results'}
 TYPES = ['results', 'weekly', 'highlight', 'hype', 'profits', 'custom']
-LABEL = {'results': 'Daily results', 'weekly': 'Weekly results', 'highlight': 'Top performers', 'hype': 'Hype', 'profits': 'Performance update', 'custom': 'Custom', 'launch': 'Launch'}
+LABEL = {'results': 'Daily results', 'weekly': 'Weekly results', 'highlight': 'Creative', 'hype': 'Hype', 'profits': 'Performance update', 'custom': 'Custom', 'launch': 'Launch'}
 MAX_AGE_H = 36
 DISCLAIMER = 'Trading involves risk. You may lose your invested capital. Past performance does not guarantee future results.'
 for d in (ST, POSTS, LOGS, os.path.join(ST, 'plan'), os.path.join(ST, 'drafts'), os.path.join(ST, 'snapshots'), os.path.join(POSTS, 'drafts')):
@@ -196,7 +196,7 @@ def canon(s):
 
 def allowed_numbers(values):
     """Each raw API value is allowed as written, rounded to 1 decimal and to a whole number."""
-    out = {canon(x) for x in (*range(1, 11), 30)}   # small counts (5 strategies, number 2, 7 days)
+    out = {canon(x) for x in (*range(1, 11), 30, 100)}   # small counts (5 strategies, number 2, 7 days)
     for v in values:
         if isinstance(v, str):
             out |= {canon(n) for n in NUM.findall(v)}
@@ -233,6 +233,11 @@ def text_problems(text, ok, what):
     np = not_percent(text)
     if np: probs.append(f'{what}: results only in percent, not: ' + ', '.join(np))
     return probs
+
+def schedule_problems(text, ok):
+    """For the schedule's own captions (several lines, emoji allowed): no banned words, every number from the data."""
+    return ([f'never mention "{NEVER.search(text).group(0)}"'] if NEVER.search(text or '') else []) + \
+           ([f'numbers not in the data: {", ".join(bad_numbers(text, ok))}'] if bad_numbers(text, ok) else [])
 
 def caption_problems(cap, ok):
     probs = []
@@ -319,26 +324,18 @@ FOLLOW = 'Daily Copy Trading Results'
 def top3(ps, f): return ', '.join(f'{nm(p)} {f(p)}' for p in ps[:3])
 def cell(text, cls='', pill=False): return [text, cls, pill]
 def sign(v): return 'g' if v >= 0 else 'r'
-
-def top_angle(data):
-    """Top Performers Today: the 3 best results of the day (all-time ROI when there is no day result yet)."""
-    up = day_up(data)
-    if up:
-        ps, m = up[:3], 'day'
-        title, chip, cap = 'Top Performers Today', "Today's best results", 'Top performers today: ' + top3(up, f_day) + '.'
-    else:
-        ps, m = sorted(data.ps, key=lambda p: -p['allTimeRoi'])[:3], 'roi'
-        title, chip, cap = 'Top Strategies', 'All-time results', 'Top strategies by total ROI: ' + top3(ps, f_roi) + '.'
-    return {'key': f'top:{m}', 'layout': 'top', 'metric': m, 'rows': [p['id'] for p in ps], 'title': title, 'chip': chip, 'headline': title, 'caption': cap,
-            'brief': f'{title}. ' + '; '.join(f'{nm(p)}: {facts(p)}' for p in ps)}
+NFA = '\n\nNot financial advice.'
+def lines(ps, f, key):   # one line per strategy, green/red dot
+    dot = lambda v: '🟢' if v > 0 else '🔴' if v < 0 else '⚪'
+    return '\n'.join(f'{dot(p[key])} {nm(p)} {f(p)}' if key in p else f'⚪ {nm(p)} –' for p in ps)
 
 def spot_angles(data):
     """Performance update on one strategy (Akhil's stat grid). Strategies up today first; without a day result, all of them by total ROI."""
     ps = day_up(data) or sorted(data.ps, key=lambda p: -p['allTimeRoi'])
     out = []
     for p in ps:
-        cap = (f'{nm(p)} today: {f_day(p)}. Win rate {f_wr(p)}, total ROI {f_roi(p)}.' if 'dayRoi' in p else
-               f'{nm(p)}: total ROI {f_roi(p)}, win rate {f_wr(p)}, max drawdown {f_dd(p)}.')
+        cap = (f'{nm(p)} today 📈\n\n{f_day(p)} on the day. Win rate {f_wr(p)}, total ROI {f_roi(p)}.' if p.get('dayRoi', 0) > 0 else
+               f'{nm(p)} 📊\n\nTotal ROI {f_roi(p)}, win rate {f_wr(p)}, max drawdown {f_dd(p)}.') + NFA
         calm = ' Lowest max drawdown of the five (calmest).' if p is min(data.ps, key=lambda q: q['drawdown']) else ''
         out.append({'key': f'spot:{p["id"]}', 'layout': 'spot', 'pid': p['id'], 'metric': 'day' if 'dayRoi' in p else 'roi', 'headline': nm(p), 'caption': cap,
                     'brief': f'Performance update on {nm(p)} ({p["strategyType"]}): {facts(p)}.{calm}'})
@@ -356,7 +353,7 @@ def daily_angle(data):
     cards = [['trophy', 'Best today', f_day(ps[0]), nm(ps[0]), 'g'], ['chart', 'In profit today', f'{len(up)} of {len(ps)}', 'strategies', ''],
              ['pct', 'Average today', f_pct(avg), 'all strategies', sign(avg)]]
     a = table_angle(data, 'daily', 'Daily Results', "Today's results", ['TODAY', 'WIN RATE', 'TOTAL ROI'], rows, cards,
-                    'Daily results. Best today: ' + top3(up, f_day) + '.' if up else 'Daily results are in.')
+                    "Today's results 📊\n\n" + lines(ps, f_day, 'dayRoi') + NFA)
     a['extra'] = [avg]; return a
 
 def index_angle(data, title='Strategy Index', chip='All-time results', key='index'):
@@ -365,7 +362,7 @@ def index_angle(data, title='Strategy Index', chip='All-time results', key='inde
     rows = [{'id': p['id'], 'cells': [cell(f_roi(p), 'g', True), cell(f_wr(p)), cell(f_dd(p), 'r')]} for p in ps]
     wr = max(ps, key=lambda p: p['winRate']); dd = min(ps, key=lambda p: p['drawdown'])
     cards = [['trophy', 'Highest ROI', f_roi(ps[0]), nm(ps[0]), 'g'], ['chart', 'Best win rate', f_wr(wr), nm(wr), ''], ['pct', 'Lowest drawdown', f_dd(dd), nm(dd), 'r']]
-    return table_angle(data, key, title, chip, ['TOTAL ROI', 'WIN RATE', 'MAX DD'], rows, cards, f'{title}. Total ROI: ' + top3(ps, f_roi) + '.')
+    return table_angle(data, key, title, chip, ['TOTAL ROI', 'WIN RATE', 'MAX DD'], rows, cards, f'{title} 📊\n\nTotal ROI, all time:\n' + lines(ps, f_roi, 'allTimeRoi') + NFA)
 
 def results_angles(data):
     return [daily_angle(data) if data.has_day else index_angle(data)]
@@ -382,15 +379,46 @@ def weekly_angle(data, old=None):
     cards = [['trophy', 'Best this week', f_pct(wk[ps[0]['id']]) if ps[0]['id'] in wk else 'New', nm(ps[0]), 'g'],
              ['chart', 'In profit this week', f'{len(up)} of {len(ps)}', 'strategies', ''], ['pct', 'Average this week', f_pct(avg), 'all strategies', sign(avg)]]
     a = table_angle(data, 'weekly', 'Weekly Results', 'This week', ['THIS WEEK', 'WIN RATE', 'TOTAL ROI'], rows, cards,
-                    'Weekly results. Best this week: ' + ', '.join(f'{nm(p)} {f_pct(wk[p["id"]])}' for p in up[:3]) + '.' if up else 'Weekly results are in.')
+                    "This week's results 📊\n\n" + lines([dict(p, wk=wk[p['id']]) if p['id'] in wk else p for p in ps], lambda p: f_pct(p['wk']), 'wk') + NFA)
     a.update(extra=list(wk.values()) + [avg], follow='Weekly Copy Trading Results'); return a
 
+
+# ---------- 1 pm creative post (team, 2026-10-22): on fire / the podium / 93 out of 100, in rotation ----------
+CREATIVE = ('fire', 'podium', 'grid')
+SPIRIT = {84: '⚔️', 100: '🌊', 101: '🛡️', 102: '⚙️', 103: '🌙'}
+def creative_angles(data):
+    up = day_up(data); v = now().timetuple().tm_yday % 2; out = []
+    if up and up[0]['dayRoi'] >= 0.2:   # "on fire" only for a real move; otherwise the all-time version
+        p = up[0]
+        cap = [f'{nm(p)} is on fire today 🔥\n\n{f_day(p)} and top of the board.', f'🔥 Best of the day: {nm(p)}\n\n{f_day(p)} today, {f_wr(p)} win rate.'][v]
+        out.append({'key': f'fire:{p["id"]}', 'layout': 'fire', 'pid': p['id'], 'metric': 'day', 'headline': nm(p), 'caption': cap + NFA})
+    else:
+        p = max(data.ps, key=lambda p: p['allTimeRoi'])
+        out.append({'key': f'fire:{p["id"]}', 'layout': 'fire', 'pid': p['id'], 'metric': 'roi', 'headline': nm(p),
+                    'caption': f'{nm(p)} 🔥🔥🔥\n\n{f_roi(p)} total ROI. {p["strategyType"]}, start to now.' + NFA})
+    if len(up) >= 3:
+        ps, m = up[:3], 'day'; cap = "Today's podium 🏆\n\n" + '\n'.join(f'{md} {nm(p)} {f_day(p)}' for md, p in zip('🥇🥈🥉', ps)) + "\n\nWho's your pick? Drop it in the comments 💬"
+    else:
+        ps, m = sorted(data.ps, key=lambda p: -p['allTimeRoi'])[:3], 'roi'
+        cap = "Who's your pick? 👇\n\n" + '\n'.join(f'{md} {nm(p)} {f_roi(p)}' for md, p in zip('🥇🥈🥉', ps)) + '\n\nTotal ROI, all time. Drop your pick in the comments 💬'
+    out.append({'key': f'podium:{m}', 'layout': 'podium', 'rows': [p['id'] for p in ps], 'metric': m, 'headline': "Who's your pick?", 'caption': cap + NFA})
+    for p in sorted(data.ps, key=lambda p: -p['winRate']):
+        out.append({'key': f'grid:{p["id"]}', 'layout': 'grid', 'pid': p['id'], 'metric': 'wr', 'headline': nm(p),
+                    'caption': f'{SPIRIT.get(p["id"], "📊")} {nm(p)}\n\nOut of every 100 trades, {round(p["winRate"])} close in profit.\n\n{f_wr(p)} win rate.' + NFA})
+    for a in out: a['brief'] = f"Creative post ({a['layout']}): " + '; '.join(f'{nm(data.by_id[i])}: {facts(data.by_id[i])}' for i in a.get('rows') or [a['pid']])
+    return out
+
 def angles_for(kind, data, day=None):
-    return {'highlight': lambda d: [top_angle(d)], 'profits': spot_angles, 'results': results_angles, 'hype': hype_angles,
+    return {'highlight': creative_angles, 'profits': spot_angles, 'results': results_angles, 'hype': hype_angles,
             'weekly': lambda d: [weekly_angle(d)], 'launch': lambda d: [launch_angle(d, day)]}[kind](data)
 
 def auto_angle(kind, data, day=None):
     angs = angles_for(kind, data, day)
+    if kind == 'highlight':   # the next format in the rotation; the win-rate grid moves on to the next strategy each time
+        last = (recent('highlight', 1) or ['grid'])[0].split(':')[0]
+        fmt = CREATIVE[(CREATIVE.index(last) + 1) % len(CREATIVE)] if last in CREATIVE else CREATIVE[0]
+        cands = [a for a in angs if a['layout'] == fmt]; used = recent('highlight', 15)
+        return next((a for a in cands if a['key'] not in used), cands[0])
     if kind == 'profits':   # performance update: a different strategy each time (up today first)
         used = recent('profits', min(3, len(angs) - 1)); return next((a for a in angs if a['key'] not in used), angs[0])
     if kind == 'hype':
@@ -552,12 +580,6 @@ h1{margin:16px 0 0;font-size:76px;line-height:1.04;font-weight:800;letter-spacin
 .sc b.g{color:#4dff9a}.sc b.r{color:#ff7a7a}
 .follow{margin-top:auto;padding-top:20px;display:flex;align-items:center;justify-content:center;gap:14px;font-size:28px;color:#e3eaff}
 .follow i{width:30px;height:30px;border-radius:50%;background:#fff;box-shadow:0 0 0 7px #1c4fd0}.follow b{color:#3d8bff;font-weight:800}
-.tops{margin-top:28px;display:flex;flex-direction:column;gap:16px;flex:none}
-.tp{display:grid;grid-template-columns:78px 1fr auto;align-items:center;gap:16px 26px;padding:20px 30px}
-.tp .plogo{max-height:76px;max-width:380px}.tp small{display:block;margin-top:8px;font-size:18px;letter-spacing:3px;color:#8fa6e8}
-.tpv{text-align:right}.tpv b{display:block;font-size:72px;font-weight:900;letter-spacing:-2px;line-height:1;color:#4dff9a;white-space:nowrap}.tpv span{display:block;margin-top:6px;font-size:18px;letter-spacing:3px;color:#8fa6e8}
-.tps{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding-top:14px;border-top:1px solid rgba(150,175,255,.16)}
-.tps div{font-size:19px;letter-spacing:2px;color:#8fa6e8}.tps b{display:block;margin-top:4px;font-size:30px;letter-spacing:0;color:#fff}
 .spot{display:flex;flex-direction:column;align-items:center;margin-top:10px;flex:none}.spot .plogo{max-height:190px;max-width:760px}
 .spot .lab{margin-top:22px;font-size:30px;letter-spacing:7px;color:#dfe7ff;font-weight:600}
 .g6{margin-top:36px;display:grid;gap:20px;flex:none}
@@ -632,15 +654,6 @@ def body_html(a, data, headline, extra):
                        ''.join(f'<div><span class="{"pill " if pill else ""}{cls}">{E(t)}</span></div>' for t, cls, pill in r['cells']) + '</div>' for i, r in enumerate(a['rows']))
         cards = ''.join(f'<div class="sc box"><div class="ico">{ICON[ic]}</div><div style="min-width:0"><span>{E(l)}</span><b class="{cls}">{E(v)}</b><small>{E(sub)}</small></div></div>' for ic, l, v, sub, cls in a['cards'])
         return f'{title_html(a)}<div class="t2"><div class="th">{hd}</div>{rows}</div><div class="cards3">{cards}</div>{follow_html(a)}'
-    if L == 'top':
-        m = a['metric']; items = ''
-        for i, pid in enumerate(a['rows']):
-            p = data.by_id[pid]
-            stats = [(k, METRIC[k][0], METRIC[k][1](p)) for k in ('day', 'roi', 'wr', 'dd') if k != m and (k != 'day' or 'dayRoi' in p)][:3]
-            items += (f'<div class="tp box"><div class="ico">{i+1}</div><div>{logo(p)}<small>{E(p["strategyType"].upper())}</small></div>'
-                      f'<div class="tpv"><b class="{tone(m, p)}">{E(METRIC[m][1](p))}</b><span>{E(METRIC[m][0])}</span></div>'
-                      f'<div class="tps">' + ''.join(f'<div>{E(lab)}<b class="{tone(k, p)}">{E(v)}</b></div>' for k, lab, v in stats[:3]) + '</div></div>')
-        return f'{title_html(a)}<div class="tops">{items}</div>{follow_html(a)}'
     if L == 'spot':
         p = data.by_id[a['pid']]
         cells = ([("TODAY", f_day(p), sign(p['dayRoi']))] if 'dayRoi' in p else []) + ([("THIS WEEK", f_week(p), sign(p['weekRoi']))] if 'weekRoi' in p else []) + \
@@ -665,7 +678,91 @@ def body_html(a, data, headline, extra):
         return out
     raise ValueError(f'unknown layout {L}')
 
+
+# ---------- creative pages (full-bleed art, emoji, glow) ----------
+CREATIVE_CSS = """*{box-sizing:border-box}body{margin:0;width:1080px;height:1350px;overflow:hidden;position:relative;font-family:-apple-system,"SF Pro Display","Helvetica Neue",Arial;color:#fff;background:#03081c}
+.emo{font-family:"Apple Color Emoji";line-height:1}.top{position:absolute;left:64px;right:64px;top:56px;display:flex;justify-content:space-between;align-items:center;z-index:5}
+.top img{height:62px}.tag{font-size:26px;font-weight:800;letter-spacing:3px;padding:12px 22px;border-radius:40px}
+.disc{position:absolute;left:64px;right:64px;bottom:40px;font-size:16px;color:rgba(220,230,255,.6);line-height:1.35;z-index:5}.disc b{color:rgba(255,255,255,.8)}
+.chips{display:flex;gap:18px}.chip{padding:18px 26px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16)}
+.chip span{display:block;font-size:18px;letter-spacing:3px;color:rgba(230,236,255,.7);font-weight:600}.chip b{display:block;font-size:40px;font-weight:800;margin-top:4px;white-space:nowrap}
+.art{position:absolute;inset:0;background-position:center;background-size:cover}.free{position:absolute;inset:0;overflow:hidden}
+/* fire */
+.fire{background:radial-gradient(70% 45% at 50% 100%,rgba(255,92,0,.55),rgba(255,92,0,0) 70%),radial-gradient(60% 40% at 50% 62%,rgba(200,30,0,.35),rgba(0,0,0,0) 70%),linear-gradient(180deg,#07061a 0%,#0b0718 45%,#1a0604 100%)}
+.em{position:absolute;border-radius:50%;background:#ffb347;box-shadow:0 0 12px 4px rgba(255,120,0,.8)}
+.fire .tag{background:linear-gradient(90deg,#ff3d00,#ff9a00);box-shadow:0 0 30px rgba(255,90,0,.6)}
+.ye{position:absolute;top:190px;left:0;right:0;display:flex;justify-content:center;filter:drop-shadow(0 0 30px rgba(80,160,255,.5))}
+.flame{position:absolute;left:50%;top:330px;transform:translateX(-50%);font-size:420px;filter:drop-shadow(0 0 60px rgba(255,80,0,.9))}
+.side{position:absolute;font-size:110px;filter:drop-shadow(0 0 30px rgba(255,80,0,.8))}
+.fbig{position:absolute;left:0;right:0;top:752px;text-align:center;font-size:178px;font-weight:900;letter-spacing:-6px;font-style:italic;line-height:1;
+ background:linear-gradient(180deg,#fff7c2 0%,#ffd23f 35%,#ff7a00 70%,#e01e00 100%);-webkit-background-clip:text;color:transparent;filter:drop-shadow(0 0 28px rgba(255,90,0,.75)) drop-shadow(0 6px 0 rgba(120,20,0,.6))}
+.flab{position:absolute;left:0;right:0;top:955px;text-align:center;font-size:30px;letter-spacing:10px;font-weight:700;color:#ffd9b0}
+.fc{position:absolute;left:64px;right:64px;top:1050px;justify-content:center}.fc .chip{border-color:rgba(255,150,60,.35);background:rgba(255,90,0,.10)}
+/* grid */
+.gshade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(2,8,20,.85) 0%,rgba(2,8,20,.35) 40%,rgba(2,8,20,.55) 70%,rgba(2,8,20,.92) 100%)}
+.gplain{background:radial-gradient(60% 45% at 85% 60%,rgba(0,140,255,.35),rgba(0,0,0,0) 70%),radial-gradient(50% 35% at 10% 10%,rgba(30,90,255,.3),rgba(0,0,0,0) 70%),linear-gradient(180deg,#041030,#020818)}
+.grid .tag{background:linear-gradient(90deg,#00c6ff,#0072ff);box-shadow:0 0 30px rgba(0,160,255,.6)}
+.cw{position:absolute;top:170px;left:64px;filter:drop-shadow(0 0 24px rgba(0,180,255,.55))}
+.gh{position:absolute;left:64px;top:340px;font-size:118px;font-weight:900;letter-spacing:-4px;line-height:.95}.gh em{font-style:normal;background:linear-gradient(180deg,#a8f5ff,#00d0ff 60%,#008cff);-webkit-background-clip:text;color:transparent}
+.gs{position:absolute;left:64px;top:470px;font-size:38px;font-weight:600;color:#d7ecff}
+.dots{position:absolute;left:64px;top:560px;width:560px;padding:26px;display:grid;grid-template-columns:repeat(10,1fr);gap:12px;border-radius:26px;background:rgba(2,14,36,.55);border:1px solid rgba(120,200,255,.28)}
+.dots i{display:block;aspect-ratio:1;border-radius:50%}.dots .w{background:radial-gradient(circle at 35% 30%,#b9fbff,#18e0a0 55%,#0aa870);box-shadow:0 0 10px rgba(40,255,170,.55)}
+.dots .l{border:3px solid #ff5a5a;box-shadow:0 0 8px rgba(255,80,80,.5)}
+.leg{position:absolute;left:64px;top:1150px;display:flex;gap:30px;font-size:24px;color:#d7ecff}.leg i{display:inline-block;width:20px;height:20px;border-radius:50%;margin-right:10px;vertical-align:-3px}
+.wc{position:absolute;left:670px;right:64px;top:600px;flex-direction:column}.wc .chip{background:rgba(2,14,36,.6);border-color:rgba(120,200,255,.3)}.wc .chip b{color:#3dffb4}
+.spirit{position:absolute;right:90px;top:1000px;font-size:150px;filter:drop-shadow(0 0 30px rgba(0,180,255,.6));transform:rotate(-8deg)}
+/* podium */
+.podium{background:radial-gradient(60% 40% at 50% 78%,rgba(255,190,40,.22),rgba(0,0,0,0) 70%),radial-gradient(60% 40% at 50% 0%,rgba(40,90,255,.35),rgba(0,0,0,0) 70%),linear-gradient(180deg,#050b24,#02050f)}
+.podium .tag{background:linear-gradient(90deg,#f5c542,#ff9f1a);color:#1d1200;box-shadow:0 0 30px rgba(255,190,40,.55)}
+.q{position:absolute;left:0;right:0;top:170px;text-align:center;font-size:104px;font-weight:900;letter-spacing:-3px}.q2{position:absolute;left:0;right:0;top:300px;text-align:center;font-size:30px;letter-spacing:8px;color:#c9d6ff;font-weight:700}
+.pod{position:absolute;left:64px;right:64px;bottom:150px;display:grid;grid-template-columns:1fr 1.12fr 1fr;align-items:end;gap:18px}
+.col{display:flex;flex-direction:column;align-items:center}.med{font-size:96px;filter:drop-shadow(0 6px 18px rgba(0,0,0,.6))}
+.lgw{height:96px;display:flex;align-items:center;justify-content:center;margin:10px 0 16px}
+.blk{width:100%;border-radius:20px 20px 6px 6px;display:flex;flex-direction:column;align-items:center;padding-top:26px;border:1px solid rgba(255,255,255,.25)}
+.blk b{font-size:46px;font-weight:900;white-space:nowrap;letter-spacing:-1px}.blk span{font-size:18px;letter-spacing:3px;margin-top:6px;font-weight:700;opacity:.85}.blk .n{font-size:120px;font-weight:900;opacity:.18;margin-top:auto;line-height:1}
+.g1{height:500px;background:linear-gradient(180deg,#ffe27a,#f5b70f 40%,#9a6a00);color:#2a1900;box-shadow:0 0 60px rgba(255,200,40,.45)}
+.g2{height:390px;background:linear-gradient(180deg,#f4f7ff,#b9c4d9 45%,#5d6a82);color:#141a26}
+.g3{height:320px;background:linear-gradient(180deg,#ffc79a,#d9803f 45%,#7a3d12);color:#2a1305}"""
+CREATIVE_FIT_JS = """<script>(function(){var bad=[];document.querySelectorAll('body *').forEach(function(e){if(e.closest('.free,.art'))return;var r=e.getBoundingClientRect();
+ if(r.width&&r.height&&(r.right>1081||r.left<-1||r.bottom>1351||r.top<-1))bad.push('out:'+(e.className||e.tagName))});
+ var d=document.querySelector('.disc').getBoundingClientRect();document.querySelectorAll('.chips,.leg,.pod,.dots').forEach(function(e){if(e.getBoundingClientRect().bottom>d.top-6)bad.push('over disclaimer:'+e.className)});
+ var m=document.createElement('meta');m.name='fitcheck';m.content=bad.length?bad.slice(0,5).join(' | '):'ok';document.head.appendChild(m)})();</script>"""
+
+def creative_page(a, data):
+    L = a['layout']; emo = lambda e, cls='', st='': f'<span class="emo {cls}" style="{st}">{e}</span>'
+    def lg(p, h, w): return f'<img src="file://{BRAND}/providers/{p["id"]}.png" style="max-height:{h}px;max-width:{w}px;display:block">'
+    top = lambda tag: f'<div class="top"><img src="file://{BRAND}/logo-full.png"><div class="tag">{tag}</div></div>'
+    if L == 'fire':
+        p = data.by_id[a['pid']]; rnd = random.Random(p['id'])
+        embers = ''.join(f'<i class="em" style="left:{rnd.randint(0, 1070)}px;top:{rnd.randint(560, 1250)}px;width:{(z := rnd.choice([4, 5, 6, 8, 10]))}px;height:{z}px;opacity:{rnd.uniform(.35, .95):.2f}"></i>' for _ in range(70))
+        big, lab = (f_day(p), "TODAY'S RESULT") if a['metric'] == 'day' else (f_roi(p), 'TOTAL ROI · ALL TIME')
+        chips = ([('TOTAL ROI', f_roi(p))] if a['metric'] == 'day' else []) + [('WIN RATE', f_wr(p)), ('STYLE', p['strategyType'])]
+        body = (f'<div class="free">{embers}</div>{top(emo("🔥") + " ON FIRE")}{emo("🔥", "flame")}<div class="ye">{lg(p, 170, 760)}</div>'
+                f'{emo("🔥", "side", "left:70px;top:600px;transform:rotate(-14deg)")}{emo("🔥", "side", "right:70px;top:560px;transform:rotate(12deg);font-size:130px")}'
+                f'<div class="fbig">{E(big)}</div><div class="flab">{lab}</div>'
+                f'<div class="chips fc">' + ''.join(f'<div class="chip"><span>{l}</span><b>{E(v)}</b></div>' for l, v in chips[:3]) + '</div>')
+    elif L == 'grid':
+        p = data.by_id[a['pid']]; n = round(p['winRate']); art = os.path.join(BRAND, 'art', f'{p["id"]}.jpg')
+        bg = (f'<div class="art" style="background-image:url(file://{art});filter:brightness(1.55) saturate(1.35)"></div><div class="gshade"></div>' if os.path.exists(art)
+              else '<div class="art gplain"></div>')
+        dots = ''.join(f'<i class="{"w" if k < n else "l"}"></i>' for k in range(100))
+        body = (f'{bg}{top(emo("🎯") + " WIN RATE")}<div class="cw">{lg(p, 120, 520)}</div><div class="gh"><em>{n}</em> out of 100</div><div class="gs">trades closed in profit</div>'
+                f'<div class="dots">{dots}</div><div class="leg"><span><i style="background:#18e0a0"></i>Win</span><span><i style="border:3px solid #ff5a5a"></i>Loss</span></div>'
+                f'<div class="chips wc"><div class="chip"><span>WIN RATE</span><b>{E(f_wr(p))}</b></div><div class="chip"><span>TOTAL ROI</span><b>{E(f_roi(p))}</b></div></div>'
+                f'{emo(SPIRIT.get(p["id"], "📊"), "spirit")}')
+    else:
+        ps = [data.by_id[i] for i in a['rows']]; m = a['metric']
+        def col(p, cls, med, rank):
+            return (f'<div class="col"><div class="med emo">{med}</div><div class="lgw">{lg(p, 86, 300)}</div><div class="blk {cls}"><b>{E(METRIC[m][1](p))}</b>'
+                    f'<span>{"TODAY" if m == "day" else "TOTAL ROI"}</span><div class="n">{rank}</div></div></div>')
+        body = (f'{top(emo("🏆") + (" TODAY&#39;S PODIUM" if m == "day" else " THE PODIUM"))}<div class="q">Who&#39;s your pick? {emo("👇")}</div>'
+                f'<div class="q2">{"TOP 3 TODAY" if m == "day" else "TOP 3 BY TOTAL ROI"}</div>'
+                f'<div class="pod">{col(ps[1], "g2", "🥈", 2)}{col(ps[0], "g1", "🥇", 1)}{col(ps[2], "g3", "🥉", 3)}</div>')
+    return (f'<!doctype html><html><head><meta charset="utf-8"><style>{CREATIVE_CSS}</style></head><body class="{L}">{body}'
+            f'<div class="disc"><b>Disclaimer:</b> {DISCLAIMER}</div>{CREATIVE_FIT_JS}</body></html>')
+
 def page_html(a, data, headline, extra):
+    if a.get('layout') in CREATIVE: return creative_page(a, data)
     cls = 'teaser' if a.get('layout') == 'teaser' else ''   # no date, time or place on any post (team, 2026-10-22)
     return (f'<!doctype html><html><head><meta charset="utf-8"><style>{CSS}</style></head><body class="{cls}"><div class="bg"></div><div class="page">'
             f'<header><img class="logo" src="file://{BRAND}/logo-full.png"></header>'
@@ -750,12 +847,7 @@ def publish_draft(d):
     return mid
 
 # ---------- the day plan ----------
-def launch_day(date):
-    start = datetime.date.fromisoformat(config()['launch_start']); n = (date - start).days + 1
-    return n if 1 <= n <= 7 else None
-
 def default_slot(date, t):
-    if t == '09:00' and launch_day(date): return {'type': 'launch', 'day': launch_day(date)}
     if t == '20:00' and date.weekday() == 6: return {'type': 'weekly'}
     return {'type': DEFAULT_TYPE[t]}
 
@@ -764,8 +856,8 @@ def load_plan(date):
     saved = jread(plan_path(date), {})
     plan = {}
     for t in SLOTS:
-        # Johannes 2026-10-22: 3 posts a day (13, 17, 20); 9 am only in launch week (or when someone schedules a post there)
-        s = dict(default_slot(date, t), status='off' if t == '09:00' and not launch_day(date) else 'planned', draft=None, previews=[])
+        # Johannes 2026-10-22: 3 posts a day (13, 17, 20); 9 am only when someone schedules a post there
+        s = dict(default_slot(date, t), status='off' if t == '09:00' else 'planned', draft=None, previews=[])
         s.update(saved.get(t, {})); plan[t] = s
     return plan
 

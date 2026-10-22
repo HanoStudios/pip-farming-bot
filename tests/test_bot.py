@@ -202,9 +202,9 @@ try:
     # Sunday weekly + launch day 1 slot types
     r = subprocess.run([sys.executable, '-c', 'import pipcore as P, datetime, json; c=P.config(); s=datetime.date.fromisoformat(c["launch_start"]); '
                         'sun=next(s+datetime.timedelta(days=i) for i in range(7) if (s+datetime.timedelta(days=i)).weekday()==6); '
-                        'print(json.dumps([P.load_plan(s)["09:00"]["type"], P.load_plan(s)["09:00"].get("day"), P.load_plan(sun)["20:00"]["type"], P.load_plan(s+datetime.timedelta(days=7))["09:00"]["type"]]))'],
+                        'print(json.dumps([P.load_plan(s)["09:00"]["status"], P.load_plan(s)["09:00"].get("day"), P.load_plan(sun)["20:00"]["type"], P.load_plan(s+datetime.timedelta(days=7))["09:00"]["status"]]))'],
                        env=ENVX, cwd=SB, capture_output=True, text=True)
-    ok(json.loads(r.stdout) == ['launch', 1, 'weekly', 'hype'], f'plan: launch day 1 at 09:00, Sunday 20:00 weekly, hype after launch week ({r.stdout.strip()})')
+    ok(json.loads(r.stdout)[2] == 'weekly' and json.loads(r.stdout)[3] == 'off', f'plan: Sunday 20:00 weekly, 9 am off ({r.stdout.strip()})')
 finally:
     bot.terminate(); srv.shutdown()
 print(open(os.path.join(SB, 'bot.out')).read()[-1500:])

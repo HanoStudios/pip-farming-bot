@@ -187,9 +187,9 @@ def dry(use_claude=False):
             a2, head, cap, extra = P.write_copy(kind, [a], data, ok=ok)
         name = f"{kind}{'-day' + a['key'][-1] if kind == 'launch' else ''}-{a['key'].replace(':', '-')}.png" if kind != 'launch' else f"launch-day{a['key'][-1]}.png"
         png = os.path.join(out, name)
-        probs = P.caption_problems(cap, ok) + P.text_problems(head, ok, 'headline')
+        probs = P.schedule_problems(cap, ok) + P.schedule_problems(head, ok)
         if probs: res.append(f'FAIL {name}: {"; ".join(probs)} | {head} | {cap}'); continue
-        try: P.render(P.page_html(a, data, head, extra), png); res.append(f'ok   {name} | {head} | {cap}')
+        try: P.render(P.page_html(a, data, head, extra), png); res.append(f'ok   {name} | ' + cap.replace(chr(10), ' / '))
         except Exception as e: res.append(f'FAIL {name}: {e}')
     custom = {'kicker': 'BEHIND THE BOARD', 'body': 'Five strategies, one board. Results in percent, nothing else.', 'stats': [{'id': data.ps[0]['id'], 'metric': 'roi'}, {'id': data.ps[1]['id'], 'metric': 'wr'}],
               'image': os.path.join(P.BRAND, 'avatar.png')}
