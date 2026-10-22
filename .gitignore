@@ -1,0 +1,10 @@
+.env
+*.pem
+state/
+logs/
+posts/
+data/providers-api.json
+data/providers-live.json
+__pycache__/
+*.pyc
+.DS_Store

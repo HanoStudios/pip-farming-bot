@@ -1,0 +1,48 @@
+<html><head><meta charset="utf-8"><style>
+@page{size:A4;margin:0}
+body{margin:0;font-family:-apple-system,"Helvetica Neue",Arial;color:#0b1430}
+.pg{width:210mm;height:297mm;box-sizing:border-box;padding:22mm 20mm;position:relative;page-break-after:always;overflow:hidden}
+.cover{background:radial-gradient(120% 70% at 50% 0%,#1b4fd6 0%,#0b2a8a 35%,#06144a 65%,#030822 100%);color:#fff}
+.cover img{height:16mm}.cover h1{font-size:44pt;line-height:1.02;margin:70mm 0 0;letter-spacing:-1px}
+.cover p{font-size:15pt;color:#c9d6ff;margin-top:8mm;max-width:150mm}
+.k{font-size:9pt;letter-spacing:3px;color:#1b4fd6;font-weight:700}
+h2{font-size:24pt;margin:3mm 0 7mm;letter-spacing:-.5px}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:4mm;margin:6mm 0 10mm}
+.s{background:#f1f5ff;border:1px solid #d9e3ff;border-radius:4mm;padding:5mm}.s b{display:block;font-size:12pt;margin-bottom:2mm}.s span{font-size:9.5pt;color:#44506e;line-height:1.4}
+.n{font-size:9pt;color:#1b4fd6;font-weight:800;margin-bottom:2mm}
+table{width:100%;border-collapse:collapse;font-size:10.5pt;margin-top:4mm}td{padding:3.2mm 0;border-bottom:1px solid #e3e8f5;vertical-align:top}td:first-child{width:38mm;font-weight:700}
+.ex{display:grid;grid-template-columns:1fr 1fr;gap:8mm;margin-top:6mm}.ex img{width:100%;border-radius:3mm;box-shadow:0 2mm 6mm rgba(0,0,0,.15)}.ex p{font-size:9.5pt;color:#44506e;margin:2mm 0 0}
+ul{padding-left:5mm;font-size:10.5pt;line-height:1.6}
+.foot{position:absolute;bottom:12mm;left:20mm;right:20mm;font-size:8pt;color:#7a86a6}
+</style></head><body>
+<div class="pg cover"><img src="../brand/logo-full.png">
+<h1>How the channel<br>runs itself.</h1>
+<p>Live results from Levels Socials, turned into clean posts and published every day. No manual work.</p>
+<div class="foot" style="color:#8fa6e8">PIP Farming · Results automation · 22 October 2026</div></div>
+
+<div class="pg"><div class="k">THE FLOW</div><h2>From live data to a post in under a minute</h2>
+<div class="flow">
+<div class="s"><div class="n">01</div><b>Fetch</b><span>Pulls every strategy's live stats from the official Levels Socials provider API.</span></div>
+<div class="s"><div class="n">02</div><b>Check</b><span>Skips strategies that aren't trading. Stops if the data is older than 36 hours.</span></div>
+<div class="s"><div class="n">03</div><b>Design</b><span>Builds a clean post in the PIP Farming style, rendered in high resolution.</span></div>
+<div class="s"><div class="n">04</div><b>Publish</b><span>The PIP Farming bot posts it to the channel with one short line.</span></div>
+</div>
+<div class="k">THE SCHEDULE</div><h2>Two posts a day</h2>
+<table>
+<tr><td>13:00 · Hype</td><td>One strategy, one number. Rotates between best win rate, strongest month, lowest drawdown and most trades.</td></tr>
+<tr><td>19:00 · Results</td><td>The full Strategy Index: total ROI, win rate and max drawdown for every active strategy.</td></tr>
+<tr><td>Comments</td><td>Every post opens a discussion in the PipFarming Community group, so people talk about the results in one place.</td></tr>
+</table>
+<div class="k" style="margin-top:12mm">THE RULES</div><h2>Built to be trusted</h2>
+<ul><li>Every number comes from the live API. Nothing is typed by hand or edited.</li>
+<li>Every post carries the risk disclaimer.</li><li>Short, simple captions. One line, human, no hype words.</li>
+<li>If anything fails, it doesn't post. No wrong numbers, ever.</li></ul>
+<div class="foot">Bangkok time (GMT+7). Trading involves risk. Past performance does not guarantee future results.</div></div>
+
+<div class="pg"><div class="k">WHAT IT POSTS</div><h2>Real examples from today</h2>
+<div class="ex"><div><img src="./ex-results.png"><p><b>Results</b> · the daily Strategy Index</p></div>
+<div><img src="./ex-hype.png"><p><b>Hype</b> · one strategy, one number</p></div></div>
+<div class="k" style="margin-top:12mm">WHAT'S NEXT</div><h2>Easy to grow</h2>
+<ul><li>Weekly recap every Sunday.</li><li>Milestone posts, like a strategy passing a new ROI level.</li><li>Trade-by-trade posts once the API shares single trades.</li></ul>
+<div class="foot">PIP Farming · @pipfarmingresults</div></div>
+</body></html>
