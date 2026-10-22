@@ -31,7 +31,8 @@ at() {   # Bangkok times, converted to this Mac's clock (launchd fires on local 
 for t in sys.argv[1:]: h, m = map(int, t.split(":")); d = D.datetime.combine(D.date.today(), D.time(h, m), ZoneInfo("Asia/Bangkok")).astimezone(); print(f"{d.hour}:{d.minute}")' "$@")
   printf '<key>StartCalendarInterval</key><array>'; for t in "$@"; do printf '<dict><key>Hour</key><integer>%s</integer><key>Minute</key><integer>%s</integer></dict>' "${t%:*}" "${t#*:}"; done; printf '</array>'; }
 plist bot  "<string>$HERE/bot.py</string>" '<key>KeepAlive</key><true/><key>RunAtLoad</key><true/>'
-plist prep "<string>$HERE/autopost.py</string><string>prep</string>" "$(at 8:30 12:30 16:30 19:30)"
-plist post "<string>$HERE/autopost.py</string><string>post</string>" "$(at 9:00 13:00 17:00 20:00)"
+plist prep "<string>$HERE/autopost.py</string><string>prep</string>" "$(at 8:30 10:30 12:30 16:30)"
+plist post "<string>$HERE/autopost.py</string><string>post</string>" "$(at 9:00 11:00 13:00 17:00)"
+plist snap "<string>-c</string><string>import pipcore as P; P.load_data()</string>" "$(at 23:55)"   # yesterday's last numbers for the 11 am results
 ./data/fetch-providers.sh || echo "Provider data not fetched yet: check PIP_SSH_KEY in .env and the key file."
 echo "Done. Open the bot on Telegram and send /start."

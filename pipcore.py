@@ -18,8 +18,8 @@ CHANNEL, GROUP = '-1003897919358', '-1004472913007'
 COMMUNITY = 't.me/pipfarmingcommunity'
 PROMOTED = (84, 100, 101, 102, 103)   # the only strategies PIP Farming promotes (same 5 as Instagram); logos in brand/providers/<id>.png
 TZ = ZoneInfo('Asia/Bangkok')
-SLOTS = ['09:00', '13:00', '17:00', '20:00']
-DEFAULT_TYPE = {'09:00': 'hype', '13:00': 'highlight', '17:00': 'profits', '20:00': 'results'}
+SLOTS = ['09:00', '11:00', '13:00', '17:00']   # 11 am = yesterday's results (Samanway 2026-10-23); 9 am off
+DEFAULT_TYPE = {'09:00': 'hype', '11:00': 'results', '13:00': 'highlight', '17:00': 'profits'}
 TYPES = ['results', 'weekly', 'highlight', 'hype', 'profits', 'custom']
 LABEL = {'results': 'Daily results', 'weekly': 'Weekly results', 'highlight': 'Creative', 'hype': 'Hype', 'profits': 'Performance update', 'custom': 'Custom', 'launch': 'Launch'}
 MAX_AGE_H = 36
@@ -166,6 +166,14 @@ def snapshot_back(as_of, backs):
 
 def previous_day(as_of): return snapshot_back(as_of, (1, 2, 3))
 
+def yesterday_data():
+    """Yesterday's last numbers (saved at 23:55), with yesterday's result vs the day before. Falls back to live data."""
+    load_data()   # also saves today's snapshot
+    j = jread(os.path.join(ST, 'snapshots', f'{now().date() - datetime.timedelta(days=1)}.json'))
+    if not j or not j.get('data', {}).get('items'): return load_data(fetch=False)
+    d = Data(j['data'], datetime.datetime.fromisoformat(j['data']['asOf'].replace('Z', '+00:00'))); d.when = 'yesterday'
+    return d
+
 class Data:
     def __init__(self, d, as_of):
         off = site_inactive()
@@ -177,6 +185,7 @@ class Data:
         self.ps = [p for p in self.all if p.get('pnl30d') and p['name'].lower().strip() not in off]   # 0 = not trading
         self.by_id = {p['id']: p for p in self.ps}
         self.has_day = any(p.get('dayRoi') for p in self.ps)
+        self.when = 'today'   # 'yesterday' when built from yesterday's last numbers (the 11 am results)
     def label(self): return self.as_of.astimezone(TZ).strftime('%-d %b, %H:%M') + ' Bangkok'
 
 # ---------- number formatting + the number check ----------
@@ -350,10 +359,11 @@ def daily_angle(data):
     ps = sorted(data.ps, key=lambda p: -p.get('dayRoi', -1e9)); up = day_up(data)
     avg = round(sum(p.get('dayRoi', 0) for p in ps) / len(ps), 2)
     rows = [{'id': p['id'], 'cells': [cell(f_day(p), sign(p['dayRoi']), True) if 'dayRoi' in p else cell('–'), cell(f_wr(p)), cell(f_roi(p), 'g')]} for p in ps]
-    cards = [['trophy', 'Best today', f_day(ps[0]), nm(ps[0]), 'g'], ['chart', 'In profit today', f'{len(up)} of {len(ps)}', 'strategies', ''],
-             ['pct', 'Average today', f_pct(avg), 'all strategies', sign(avg)]]
-    a = table_angle(data, 'daily', 'Daily Results', "Today's results", ['TODAY', 'WIN RATE', 'TOTAL ROI'], rows, cards,
-                    "Today's results 📊\n\n" + lines(ps, f_day, 'dayRoi') + NFA)
+    w = data.when; W = w.capitalize()
+    cards = [['trophy', f'Best {w}', f_day(ps[0]), nm(ps[0]), 'g'], ['chart', f'In profit {w}', f'{len(up)} of {len(ps)}', 'strategies', ''],
+             ['pct', f'Average {w}', f_pct(avg), 'all strategies', sign(avg)]]
+    a = table_angle(data, 'daily', 'Daily Results', f"{W}'s results", [w.upper(), 'WIN RATE', 'TOTAL ROI'], rows, cards,
+                    f"{W}'s results 📊\n\n" + lines(ps, f_day, 'dayRoi') + NFA)
     a['extra'] = [avg]; return a
 
 def index_angle(data, title='Strategy Index', chip='All-time results', key='index'):
@@ -934,7 +944,7 @@ def save_draft(d):
 
 def make_draft(kind, data=None, context='', images=(), day=None, auto=False, by=None, prev=None, note=''):
     """Builds (or rebuilds, with prev + note) a post: angle -> copy -> image. Returns the draft dict."""
-    data = data or load_data()
+    data = data or (yesterday_data() if kind == 'results' else load_data())
     ok_extra = []
     if kind == 'custom': angles = []
     elif prev and prev.get('angle_key') and not context and kind != 'weekly':
@@ -981,7 +991,7 @@ def publish_draft(d):
 
 # ---------- the day plan ----------
 def default_slot(date, t):
-    if t == '20:00' and date.weekday() == 6: return {'type': 'weekly'}
+    if t == '11:00' and date.weekday() == 6: return {'type': 'weekly'}   # Sunday 11 am: the week
     return {'type': DEFAULT_TYPE[t]}
 
 def plan_path(date): return os.path.join(ST, 'plan', f'{date}.json')
@@ -990,7 +1000,7 @@ def load_plan(date):
     plan = {}
     for t in SLOTS:
         # Johannes 2026-10-22: 3 posts a day (13, 17, 20); 9 am only when someone schedules a post there
-        s = dict(default_slot(date, t), status='off' if t == '09:00' else 'planned', draft=None, previews=[])
+        s = dict(default_slot(date, t), status='off' if t == '09:00' or (t == '11:00' and date.weekday() == 0) else 'planned', draft=None, previews=[])
         s.update(saved.get(t, {})); plan[t] = s
     return plan
 

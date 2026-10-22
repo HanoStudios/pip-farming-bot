@@ -312,8 +312,8 @@ def unschedule(d):
 
 # ---------- onboarding: the plan in plain words, then every post format as a test ----------
 PLAN_TEXT = ("Here is the plan.\n\n"
-             "Every day, 3 posts:\n1 pm  Creative (a new design every day: on fire, race, head to head, podium, guess who…)\n5 pm  Performance update (one strategy)\n8 pm  Daily results (all 5 compared)\n\n"
-             "Every Sunday at 8 pm: the weekly results.\n\n"
+             "Every day, 3 posts:\n11 am  Yesterday's results (all 5 compared)\n1 pm  Creative (a new design every day: on fire, race, head to head, podium, guess who…)\n5 pm  Performance update (one strategy)\n\n"
+             "Every Sunday at 11 am: the weekly results.\n\n"
              "Nothing goes out until one of you taps Approve.\n\nClear?")
 SIMPLE_TEXT = ("Simple version:\n\n"
                "The bot makes 3 posts a day from the live numbers.\n"
@@ -353,7 +353,7 @@ ASSISTANT = """You are Samanway's assistant on Telegram. You run the PIP Farming
 You are talking to {who} (Samanway is your boss; Johannes is Samanway's boss). Talk like a real person: warm, direct, simple English, short. Never say you are an AI or a bot.
 Write 1 to 3 very short messages (each one or two sentences), like texting.
 What you know:
-- Plan (Johannes decided it): 3 posts a day, 1 pm a creative post (a different design every day: on fire, the race, head to head, the podium, pick your card, milestone club, guess who and more), 5 pm Performance update on one strategy, 8 pm Daily results comparing all 5. Weekly results every Sunday 8 pm.
+- Plan (Johannes decided it): 3 posts a day, 1 pm a creative post (a different design every day: on fire, the race, head to head, the podium, pick your card, milestone club, guess who and more), 5 pm Performance update on one strategy, 11 am yesterday's results comparing all 5 (not on Mondays). Weekly results every Sunday 11 am.
 - Every post comes to Johannes and Samanway first with Approve, Change, Reject. Nothing goes out without approval. If he's happy he just taps Approve and it goes out as it is.
 - The channel promotes exactly 5 strategies: Cool Wave, Glade Coms, Nightshift FX, PBS FX, Yield Engine. Never any other.
 - Posts show results in percent only, mostly the results of the day. They never mention the API, the provider, "posted every day", "no edits", dates, times or places.
@@ -401,7 +401,7 @@ def tell_blip(text):
 
 def greet(uid):
     msgs = ["Hi Johannes, I'm Samanway's assistant. I run the PIP Farming channel for him.",
-            "I've set it up your way: 3 posts a day at 1 pm, 5 pm and 8 pm, plus the weekly results every Sunday at 8 pm.",
+            "I've set it up your way: 3 posts a day at 11 am, 1 pm and 5 pm, plus the weekly results every Sunday at 11 am.",
             "Every post comes to you first. If you're happy, tap Approve and it goes out as it is. Nothing posts without your OK.",
             "And if you want a post about something specific, just tell me here. I'll make it and you can change anything.",
             "Is this plan final for you, or is there anything else you need from the automation?"]

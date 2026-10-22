@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """PIP Farming schedule (Asia/Bangkok). Slots: 09:00 hype (launch sequence during launch week), 13:00 highlight,
-17:00 profits, 20:00 results (Sunday: weekly results).
+17:00 profits; 11:00 yesterday's results (Sunday: weekly; Monday: none).
 launchd:
   com.pipfarming.prep  08:30 12:30 16:30 19:30 -> `autopost.py prep`  build the next slot's post, preview it to the admins,
                        and write the hook file state/pending/HHMM.json {slot, date, time, type, png, caption, skip:false}
-  com.pipfarming.post  09:00 13:00 17:00 20:00 -> `autopost.py post`  post the slot that is due now
+  com.pipfarming.post  09:00 11:00 13:00 17:00 -> `autopost.py post`  post the slot that is due now
 At post time: nothing is posted if state/paused exists, if state/pending/HHMM.json has "skip": true, or if the data is
 older than 36 h / the render failed (one line in logs/post.log). An edited "caption" or "png" in the pending file is used.
 More than 2 h late (Mac asleep): not posted, marked missed.
